@@ -1,0 +1,36 @@
+.cal-trends-range { display: inline-flex; gap: 2px; padding: 4px; border: 1px solid var(--cal-border); border-radius: 100px; background: #eeeee7; margin-bottom: 20px; }
+.cal-trends-range button { border: 0; background: transparent; border-radius: 100px; padding: 8px 16px; min-height: 36px; font-size: 12px; font-weight: 550; color: #70776e; }
+.cal-trends-range button[aria-pressed='true'] { background: var(--cal-panel); color: var(--cal-green); box-shadow: 0 1px 4px #263a2410; }
+.cal-trends-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+.cal-trends-stat, .cal-trends-chart-card, .cal-plan-card { border: 1px solid var(--cal-border); border-radius: 18px; background: var(--cal-panel); padding: 18px 20px; }
+.cal-trends-stat span { display: block; font-size: 11px; color: var(--cal-muted); letter-spacing: .4px; text-transform: uppercase; }
+.cal-trends-stat strong { display: block; font-size: 26px; letter-spacing: -.8px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.cal-trends-stat small { font-size: 12px; font-weight: 450; color: var(--cal-muted); }
+.cal-trends-chart-card { margin-bottom: 20px; }
+.cal-trends-chart-card h2, .cal-plan-card h2 { font-size: 18px; letter-spacing: -.4px; }
+.cal-trends-chart-card > p, .cal-plan-card > p { color: var(--cal-muted); font-size: 12px; margin: 2px 0 14px; }
+.cal-trends-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.cal-trends-svg text { font-size: 10px; fill: var(--cal-muted); font-family: inherit; }
+.cal-trends-bar { fill: #9fb48f; }
+.cal-trends-bar.is-over { fill: #c5a066; }
+.cal-trends-burn { fill: none; stroke: var(--cal-green); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.cal-trends-grid { stroke: var(--cal-border); stroke-width: 1; }
+.cal-trends-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 11px; color: var(--cal-muted); margin-top: 10px; }
+.cal-trends-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: #9fb48f; }
+.cal-trends-legend i.is-line { height: 2px; border-radius: 0; background: var(--cal-green); vertical-align: 3px; width: 14px; }
+.cal-trends-legend i.is-over { background: #c5a066; }
+.cal-plan-card { background: #edf0e5; border-color: #e3e7d7; }
+.cal-plan-rate { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 8px 0 16px; }
+.cal-plan-rate input[type='range'] { flex: 1; min-width: 160px; accent-color: var(--cal-green); min-height: 44px; }
+.cal-plan-rate output { font-weight: 650; font-variant-numeric: tabular-nums; min-width: 92px; }
+.cal-plan-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.cal-plan-grid span { background: var(--cal-panel); border: 1px solid var(--cal-border); border-radius: 12px; padding: 10px 12px; font-size: 11px; color: var(--cal-muted); }
+.cal-plan-grid strong { display: block; font-size: 18px; color: var(--cal-ink); font-variant-numeric: tabular-nums; }
+.cal-plan-note { margin-top: 12px; font-size: 12px; color: var(--cal-muted); }
+@media (max-width: 760px) {
+  .cal-trends-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .cal-trends-stat strong { font-size: 22px; }
+  .cal-plan-grid { grid-template-columns: repeat(2, 1fr); }
+  .cal-trends-range { display: flex; }
+  .cal-trends-range button { flex: 1; }
+}

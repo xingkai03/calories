@@ -22,9 +22,9 @@ export function emptyData(): TrackerData {
 }
 
 /** An untouched day starts with Garmin; recorded days and explicit day overrides stay intact. */
-export function settingsForDay(data: TrackerData, date: string): DaySettings {
+export function settingsForDay(data: TrackerData, date: string, hasEntries?: boolean): DaySettings {
   if (data.days[date]) return data.days[date];
-  if (data.entries.some(entry => entry.date === date)) return data.defaults;
+  if (hasEntries ?? data.entries.some(entry => entry.date === date)) return data.defaults;
   return { ...data.defaults, burned: 0, burnedSource: 'garmin' };
 }
 

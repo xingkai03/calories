@@ -586,3 +586,16 @@
 
 .cal-entry-mode-with-bank { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 760px) { .cal-nav button { min-width: 0; padding-inline: 9px; } }
+
+/* Mobile polish: five-tab nav that never overflows, no iOS focus-zoom, faster taps, safe-area padding. */
+.cal-nav { overflow-x: auto; scrollbar-width: none; }
+.cal-nav::-webkit-scrollbar { display: none; }
+.cal-nav button { white-space: nowrap; }
+.calorie-app button, .calorie-app a, .calorie-app select, .calorie-app input[type='range'] { touch-action: manipulation; }
+.cal-dialog { overscroll-behavior: contain; }
+@media (max-width: 760px) {
+  .calorie-app input:not([type='checkbox']):not([type='radio']):not([type='range']), .calorie-app select, .calorie-app textarea { font-size: 16px; }
+  .cal-footer { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+  .cal-nav button { flex: 1 0 auto; }
+}
+@media (max-width: 430px) { .cal-nav button { font-size: 11.5px; padding-inline: 7px; } }

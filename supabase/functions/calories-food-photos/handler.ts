@@ -12,7 +12,7 @@ export interface FoodPhotoServerOptions {
   extract?: typeof extractFoodPhotos;
   estimate?: typeof estimateMealPhoto;
 }
-const ALLOWED_ORIGINS = new Set(['https://fangxk2003.github.io', 'http://127.0.0.1:4321', 'http://localhost:4321']);
+const ALLOWED_ORIGINS = new Set(['https://xingkai03.github.io', 'http://127.0.0.1:4321', 'http://localhost:4321']);
 
 async function readBody(request: Request, signal: AbortSignal): Promise<unknown> {
   const length = Number(request.headers.get('content-length'));

@@ -12,7 +12,7 @@ Run `backend/calories/garmin.sql` after the existing setup. This creates private
 
 Deploy `backend/calories/garmin-edge/index.ts` as `calories-garmin-worker`. Set `verify_jwt = false`: its custom machine authentication checks a scoped credential through the service-only RPC before any operation. The Edge runtime's service-role key remains server-side. Request bodies, tokens, raw Garmin errors, and health values are not logged.
 
-Copy `backend/calories/garmin-sync/{worker.py,requirements.lock}` and `workflow.yml` (as `.github/workflows/sync.yml`) into the private `fangxk2003/calories-garmin-sync` repository. The private repository keeps logs private and avoids GitHub's public-repository 60-day inactivity schedule suspension. `GARMIN_SYNC_ENDPOINT` is a repository variable. Hourly jobs run at minute 17, with read-only GitHub permissions and no cached tokens/artifacts. GitHub schedules can be delayed.
+Copy `backend/calories/garmin-sync/{worker.py,requirements.lock}` and `workflow.yml` (as `.github/workflows/sync.yml`) into the private `xingkai03/calories-garmin-sync` repository. The private repository keeps logs private and avoids GitHub's public-repository 60-day inactivity schedule suspension. `GARMIN_SYNC_ENDPOINT` is a repository variable. Hourly jobs run at minute 17, with read-only GitHub permissions and no cached tokens/artifacts. GitHub schedules can be delayed.
 
 ## One-time sign-in
 

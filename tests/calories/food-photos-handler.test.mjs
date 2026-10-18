@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createFoodPhotoHandler } from '../../supabase/functions/calories-food-photos/handler.ts';
 import { MAX_PHOTO_REQUEST_BYTES } from '../../src/lib/calories/food-photos.ts';
 
-const ORIGIN = 'https://fangxk2003.github.io';
+const ORIGIN = 'https://xingkai03.github.io';
 const SUPABASE_URL = 'https://storage.example.test';
 const PUBLIC_KEY = 'sb_publishable_test_public_key';
 const PROVIDER_KEY = 'test-provider-secret-must-not-appear';
@@ -212,7 +212,7 @@ test('CORS preflight supports only the production and explicit local QA origins 
 });
 
 test('lookalike origins and unsupported methods cannot trigger owner checks or provider calls', async () => {
-  for (const origin of ['https://fangxk2003.github.io.attacker.example.test', 'http://fangxk2003.github.io', 'https://localhost:4321', 'null']) {
+  for (const origin of ['https://xingkai03.github.io.attacker.example.test', 'http://xingkai03.github.io', 'https://localhost:4321', 'null']) {
     const { handler, calls } = harness();
     const response = await handler(upload(undefined, { origin }));
     await assertFailure(response, 403, 'origin_denied');

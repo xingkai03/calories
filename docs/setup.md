@@ -1,6 +1,6 @@
 # Connect Calories to your Supabase project
 
-The app lives at `https://fangxk2003.github.io/calories/`. GitHub Pages serves the interface; Supabase stores the private food library, prepared food bank portions, daily entries, and targets. Both iPhone and Mac sign in to the same account and read the same saved data.
+The app lives at `https://xingkai03.github.io/calories/`. GitHub Pages serves the interface; Supabase stores the private food library, prepared food bank portions, daily entries, and targets. Both iPhone and Mac sign in to the same account and read the same saved data.
 
 ## 1. Create your one account
 

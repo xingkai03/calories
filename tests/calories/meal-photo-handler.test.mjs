@@ -5,7 +5,7 @@ import { PhotoProviderError } from '../../supabase/functions/calories-food-photo
 import { MAX_PHOTO_REQUEST_BYTES } from '../../src/lib/calories/food-photos.ts';
 import { normalizeMealPhotoDraft, normalizeMealPhotoRequest } from '../../src/lib/calories/meal-photos.ts';
 
-const ORIGIN = 'https://fangxk2003.github.io';
+const ORIGIN = 'https://xingkai03.github.io';
 const TOKEN = 'meal-owner-token';
 const API_KEY = 'private-meal-provider-key';
 const PHOTO = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS4kAAAAASUVORK5CYII=' };

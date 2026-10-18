@@ -3,6 +3,7 @@ import { deployedConfiguration } from './config.ts';
 import { normalizeGarminSnapshot, type GarminSnapshot } from './garmin.ts';
 import { normalizeFoodPhotoDraft, normalizeFoodPhotoRequest, type FoodPhotoDraft, type FoodPhotoRequest } from './food-photos.ts';
 import { normalizeMealPhotoDraft, normalizeMealPhotoRequest, type MealPhotoDraft, type MealPhotoRequest } from './meal-photos.ts';
+import { withMealPhotoDeadline } from './meal-photo-deadline.ts';
 import { JournalConflictError, RecoverableNetworkError, isRecoverableNetworkError, journalCacheKey, journalEqual, mergeJournals, normalizeJournalCache, withJournalLock, type JournalCache, type JournalSnapshot } from './offline.ts';
 export { isRecoverableNetworkError } from './offline.ts';
 export type { JournalSnapshot } from './offline.ts';
@@ -210,6 +211,7 @@ export function createClient(options: ClientOptions = {}) {
   }
   async function authenticated(path: string, init: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
     let current = await ensureSession();
+    init.signal?.throwIfAborted();
     let response = await http(path, init, current.accessToken, timeoutMs);
     if (response.status === 401) {
       try { await refresh(true); }
@@ -219,6 +221,7 @@ export function createClient(options: ClientOptions = {}) {
         throw error;
       }
       current = await ensureSession();
+      init.signal?.throwIfAborted();
       response = await http(path, init, current.accessToken, timeoutMs);
     }
     return response;
@@ -474,15 +477,19 @@ export function createClient(options: ClientOptions = {}) {
     },
     async estimateMealPhoto(input: MealPhotoRequest, signal?: AbortSignal): Promise<MealPhotoDraft> {
       const meal = normalizeMealPhotoRequest(input);
-      signal?.throwIfAborted();
-      const response = await authenticated('/functions/v1/calories-food-photos', { method: 'POST', body: JSON.stringify({ mode: 'meal', ...meal }), signal }, 80000);
-      signal?.throwIfAborted();
-      if (!response.ok) {
-        const failure = await response.json().catch(() => ({}));
-        const message = typeof failure.error === 'string' && failure.error.length <= 500 ? failure.error : 'The meal could not be estimated. Try another photo or enter the values manually.';
-        throw new Error(message);
-      }
-      return normalizeMealPhotoDraft(await response.json());
+      return withMealPhotoDeadline(async requestSignal => {
+        const response = await authenticated('/functions/v1/calories-food-photos', { method: 'POST', body: JSON.stringify({ mode: 'meal', ...meal }), signal: requestSignal }, 80000);
+        requestSignal.throwIfAborted();
+        if (!response.ok) {
+          const failure = await response.json().catch(() => ({}));
+          requestSignal.throwIfAborted();
+          const message = typeof failure.error === 'string' && failure.error.length <= 500 ? failure.error : 'The meal could not be estimated. Try another photo or enter the values manually.';
+          throw new Error(message);
+        }
+        const draft = await response.json();
+        requestSignal.throwIfAborted();
+        return normalizeMealPhotoDraft(draft);
+      }, signal);
     },
     async loadGarmin(): Promise<GarminSnapshot> {
       try {

@@ -119,6 +119,8 @@ Use **Log food → Manual estimate** for a restaurant meal or another meal witho
 
 ### Estimate a meal from a photo
 
+The complete estimate request has an 80-second deadline, including session verification, upload and response reading. A stalled connection releases the form with a retry message and keeps the selected photo. Cancel also stops waiting for an incomplete response. Late responses cannot refill the form after cancellation or timeout; retry only starts when you choose **Estimate from photo** again.
+
 In **Log food → Manual estimate**, choose **Meal photo**, then **Estimate from photo**. The existing Gemini connection suggests the meal name and grams of protein, carbohydrate, fat and fibre for the **whole pictured portion**. An optional meal name already typed in the form is sent as context. Review or edit the suggested totals, choose the date and meal, then **Add to journal**. Photo estimates can also update an existing manual entry before you save its changes.
 
 These are approximate visual estimates, including portion size and likely ingredients; they are not label readings. Missing values stay blank. Energy still uses the local 4/4/9 calculation, excluding fibre. A photo is processed only after you request the estimate and is not stored in the journal. The same authenticated Edge Function, Gemini model and server-side GEMINI_API_KEY are used; no new API key or database setup is required. Cancelling, replacing a photo, switching away from Manual estimate, or closing the dialog cancels the request and ignores any late response. The food-library photo importer continues to read printed label values only.

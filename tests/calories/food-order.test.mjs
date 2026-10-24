@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sortFoodsByRecentUse } from '../../src/lib/calories/food-order.ts';
+import { mealForTime, recentFoodIds, sortFoodsByRecentUse } from '../../src/lib/calories/food-order.ts';
 
 const food = (id, name, overrides = {}) => ({
   id, name, baseQuantity: 100, unit: 'g', state: 'Cooked',
@@ -121,4 +121,21 @@ test('calendar-window boundaries remain inclusive across leap day and the Stockh
     ];
     assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, currentDay)), ['inside', 'outside'], currentDay);
   }
+});
+
+test('recent foods cover today and the six days before, ignoring manual, older and future logs', () => {
+  const entries = [
+    entry('edge', 'week-edge', '2026-10-08'),
+    entry('today', 'today', '2026-10-14'),
+    entry('old', 'too-old', '2026-10-07'),
+    entry('future', 'future', '2026-10-15'),
+    entry('manual', 'manual:manual', '2026-10-14'),
+    entry('manual-source', 'flagged', '2026-10-14', { source: 'manual' }),
+  ];
+  assert.deepEqual([...recentFoodIds(entries, '2026-10-14')].sort(), ['today', 'week-edge']);
+});
+
+test('the default meal follows the local time of day', () => {
+  const at = hour => mealForTime(new Date(2026, 9, 14, hour, 30));
+  assert.deepEqual([0, 3, 4, 10, 11, 15, 16, 21, 23].map(at), ['Dinner', 'Dinner', 'Breakfast', 'Breakfast', 'Lunch', 'Lunch', 'Dinner', 'Dinner', 'Dinner']);
 });

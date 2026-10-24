@@ -12,6 +12,7 @@ import type { FormDraftSummary } from '../../lib/calories/form-drafts';
 import { assertCurrentRecord } from '../../lib/calories/draft-conflicts';
 import { createUndoAction, undoAction, type UndoAction, type UndoKind } from '../../lib/calories/undo';
 import UndoNotice from './UndoNotice';
+import { applyCaloriesUpdate, CALORIES_UPDATE_EVENT } from '../../lib/calories/offline-shell';
 import { Icon, number, signedNumber, readableDate, errorMessage, syncTime, burnedLabel, burnedFormula, burnedSyncTime, staleImport, garminStatusLabel, downloadFile, unitLabel } from './ui';
 import './calories.css';
 import './offline.css';
@@ -86,6 +87,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   const [deleteFoodId, setDeleteFoodId] = useState<string | null>(null);
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE);
   const [trendsNotice, setTrendsNotice] = useState('');
+  const [updateWorker, setUpdateWorker] = useState<ServiceWorker | null>(null);
   const queue = useRef<TrackerData | null>(null);
   const saving = useRef(false);
   const blockedSave = useRef(false);
@@ -121,6 +123,20 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }, []);
 
   locationRef.current = { view, date, currentDay };
+
+  useEffect(() => {
+    const onUpdate = (event: Event) => setUpdateWorker((event as CustomEvent<ServiceWorker>).detail);
+    window.addEventListener(CALORIES_UPDATE_EVENT, onUpdate);
+    // The build may have finished installing before this component mounted.
+    navigator.serviceWorker?.getRegistration('/calories/').then(registration => { if (registration?.waiting && navigator.serviceWorker.controller) setUpdateWorker(registration.waiting); }).catch(() => {});
+    return () => window.removeEventListener(CALORIES_UPDATE_EVENT, onUpdate);
+  }, []);
+  async function reloadForUpdate() {
+    if (!updateWorker) return;
+    // Changes are staged on this device first, so finishing the local write is enough before reloading.
+    await localWork.current;
+    applyCaloriesUpdate(updateWorker);
+  }
 
   useEffect(() => {
     if (phase !== 'ready') return;
@@ -540,6 +556,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   const historyDates = useMemo(() => [...new Set([...entriesByDate.keys(), ...Object.keys(data.days)])].sort().reverse(), [entriesByDate, data.days]);
 
   return <div className="calorie-app">
+    {updateWorker && <div className="cal-update-banner" role="status"><span>A new version of Calories is ready.</span><button className="cal-button cal-button-small cal-button-primary" onClick={() => void reloadForUpdate()}><Icon name="refresh" size={16}/>Reload</button></div>}
     {phase !== 'ready' ? <main className="cal-auth-shell">
       <a className="cal-home-link" href="/">← Back to my website</a>
       <div className="cal-auth-brand"><span className="cal-brand-mark"><Icon name="leaf" size={24}/></span><span>calories<span className="cal-brand-dot">.</span></span></div>

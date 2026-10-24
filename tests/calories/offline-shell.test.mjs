@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import caloriesPwa, { buildCaloriesWorker } from '../../scripts/calories-pwa.mjs';
-import { registerCaloriesOfflineShell } from '../../src/lib/calories/offline-shell.ts';
+import { applyCaloriesUpdate, CALORIES_UPDATE_EVENT, registerCaloriesOfflineShell } from '../../src/lib/calories/offline-shell.ts';
 
 const ORIGIN = 'https://example.test';
 const fixed = ['/calories/icon.svg', '/calories/icon-192.png', '/calories/icon-512.png', '/calories/apple-touch-icon.png', '/calories/manifest.webmanifest'];
@@ -95,6 +95,7 @@ function worker(code, harness) {
       handlers.get('fetch')({ request: { url: new URL(url, ORIGIN).href, method, mode, headers: new Headers(headers) }, respondWith(promise) { response = promise; } });
       return response === undefined ? undefined : await response;
     },
+    message(data) { handlers.get('message')({ data }); },
     get takeoverCalls() { return { skipWaiting, claim }; },
   };
 }
@@ -242,4 +243,44 @@ test('registration is production-only, secure and scoped, with HTTP cache bypass
   assert.equal(calls.length, 1);
   browser.navigator.serviceWorker.register = async () => { throw new Error('Browser storage unavailable'); };
   assert.equal(await registerCaloriesOfflineShell(true, browser), undefined, 'a PWA installation failure does not break online use');
+});
+
+test('a waiting build activates only when the page asks for it', async t => {
+  const { directory, files } = await fixture(t);
+  await buildCaloriesWorker(directory, graph);
+  const serverFiles = new Map(files); serverFiles.set('/calories/', files.get('/calories/index.html'));
+  const harness = cacheHarness(serverFiles), sw = worker(await readFile(path.join(directory, 'calories/sw.js'), 'utf8'), harness);
+  await sw.dispatch('install');
+  sw.message({ type: 'something-else' });
+  sw.message(null);
+  assert.deepEqual(sw.takeoverCalls, { skipWaiting: 0, claim: 0 });
+  sw.message({ type: 'calories-skip-waiting' });
+  assert.deepEqual(sw.takeoverCalls, { skipWaiting: 1, claim: 0 });
+});
+
+test('registration announces a replacement build, checks for updates when visible, and reloads after takeover', async () => {
+  const listeners = {}, events = [], updates = [];
+  const waiting = { posted: [], postMessage(message) { this.posted.push(message); } };
+  const registration = { waiting, update: async () => { updates.push(1); }, addEventListener(type, callback) { listeners[type] = callback; } };
+  const documentListeners = {};
+  const document = { visibilityState: 'visible', addEventListener(type, callback) { documentListeners[type] = callback; } };
+  let controllerChange, reloads = 0;
+  const serviceWorker = { controller: {}, async register() { return registration; }, addEventListener(type, callback) { if (type === 'controllerchange') controllerChange = callback; } };
+  const browser = { location: { pathname: '/calories/', reload() { reloads++; } }, isSecureContext: true, navigator: { serviceWorker }, document, dispatchEvent(event) { events.push(event); } };
+  assert.equal(await registerCaloriesOfflineShell(true, browser), registration);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, CALORIES_UPDATE_EVENT);
+  assert.equal(events[0].detail, waiting);
+  documentListeners.visibilitychange();
+  assert.equal(updates.length, 1);
+  applyCaloriesUpdate(waiting, browser);
+  assert.deepEqual(waiting.posted, [{ type: 'calories-skip-waiting' }]);
+  assert.equal(reloads, 0);
+  controllerChange();
+  assert.equal(reloads, 1);
+
+  serviceWorker.controller = null;
+  events.length = 0;
+  await registerCaloriesOfflineShell(true, browser);
+  assert.equal(events.length, 0, 'a first install does not ask the user to reload');
 });

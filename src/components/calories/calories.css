@@ -629,3 +629,4 @@
   .cal-fab-raised { bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
   .cal-main { padding-bottom: 72px; }
 }
+.cal-update-banner { position: sticky; top: 0; z-index: 70; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 14px; padding: 8px 16px; padding-top: max(8px, env(safe-area-inset-top)); background: #e4ecd7; border-bottom: 1px solid #cfdbbe; color: #2f4a26; font-size: 13px; font-weight: 550; }

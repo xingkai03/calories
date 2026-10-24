@@ -3,7 +3,7 @@ import { addDays, dayTotals, emptyData, normalizeData, settingsForDay, todayISO,
 import { createClient, isRecoverableNetworkError, type JournalSnapshot } from '../../lib/calories/client';
 import { effectiveBurned, emptyGarminSnapshot, type GarminSnapshot } from '../../lib/calories/garmin';
 import { DAILY_PROTEIN_GRAMS, macroTargets, nutrientProgress } from '../../lib/calories/nutrition';
-import { adjustedBudget, calorieLedger, carryBefore, MAX_DAILY_DEFICIT, MAX_DAILY_SURPLUS_CARRY } from '../../lib/calories/budget';
+import { adjustedBudget, calorieLedger, carryBefore, outstandingAfter, CARRY_SPREAD_DAYS } from '../../lib/calories/budget';
 import { RECENT_FOOD_DAYS, recentFoodIds, sortFoodsByRecentUse } from '../../lib/calories/food-order';
 import { FoodBankView, FoodBankEditor, FoodBankConsume } from './FoodBank';
 import { addPreparedPortions, consumeFoodBankPortion } from '../../lib/calories/food-bank';
@@ -538,8 +538,8 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   const allowance = adjustedBudget(burned.burned, targets.deficit, carryIn);
   const budget = allowance.budget;
   const remaining = budget - totals.calories;
-  const rawBalance = allowance.rawBudget - totals.calories;
   const selectedBalance = ledger.days[date];
+  const rawBalance = selectedBalance ? selectedBalance.balance : outstandingAfter(date, ledger);
   const hasPendingLoggedDays = Object.values(ledger.days).some(row => row.date < currentDay && !row.available);
   const deficit = burned.burned - totals.calories;
   const calorieProgress = nutrientProgress(totals.calories, budget);
@@ -630,12 +630,11 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
 
           <section className="cal-carry-panel" aria-label="Running calorie balance">
             <div className="cal-carry-heading"><h2>Running calorie balance</h2><span>{burned.unavailable ? 'Waiting for Garmin' : selectedBalance?.settled ? 'Carried forward' : carryIsProvisional ? 'Future projection' : date === currentDay ? 'Today is provisional' : dayEntries.length ? 'Not settled yet' : 'Unlogged day'}</span></div>
-            <div className="cal-carry-values"><span>Base budget<strong>{burned.unavailable ? '—' : number(allowance.baseBudget, 1)} <small>kcal</small></strong></span><span>Carry from earlier days{carryIsProvisional ? ' (provisional)' : ''}<strong>{signedNumber(carryIn)} <small>kcal</small></strong></span><span>{selectedBalance ? 'Balance after logged food' : 'Projected balance'}<strong>{burned.unavailable ? '—' : signedNumber(rawBalance)} <small>kcal</small></strong></span></div>
-            <details className="cal-carry-details"><summary>How the running balance works</summary><p>Carry can lower a day’s budget by at most {number(MAX_DAILY_DEFICIT)} kcal below burned, and raise it by at most {number(MAX_DAILY_SURPLUS_CARRY)} kcal above the base budget. Unpaid debt and unused credit both stay in the running balance. Completed logged days settle that balance.{date === currentDay ? ledger.provisional ? ' Today’s balance is provisional and is included when previewing later days.' : dayEntries.length ? ' Today’s carry is waiting for calories burned.' : ' Today has no logged food, so it does not add to carry.' : !dayEntries.length ? ' This day has no logged food, so it does not add to carry.' : date > currentDay ? ' Planned future meals do not carry forward yet.' : ''}</p></details>
+            <div className="cal-carry-values"><span>Base budget<strong>{burned.unavailable ? '—' : number(allowance.baseBudget, 1)} <small>kcal</small></strong></span><span>Carry from last {CARRY_SPREAD_DAYS} days{carryIsProvisional ? ' (provisional)' : ''}<strong>{signedNumber(carryIn)} <small>kcal</small></strong></span><span>{selectedBalance ? 'Still to carry after this day' : 'Still to carry'}<strong>{burned.unavailable ? '—' : signedNumber(rawBalance)} <small>kcal</small></strong></span></div>
+            <details className="cal-carry-details"><summary>How the running balance works</summary><p>Each logged day’s difference from its budget is spread evenly over the next {CARRY_SPREAD_DAYS} days: eating 700 kcal over takes 100 kcal off each of the next {CARRY_SPREAD_DAYS} budgets, and eating under adds it the same way. Eating exactly your budget adds nothing new. Completed logged days settle.{date === currentDay ? ledger.provisional ? ' Today’s balance is provisional and is included when previewing later days.' : dayEntries.length ? ' Today’s carry is waiting for calories burned.' : ' Today has no logged food, so it does not add to carry.' : !dayEntries.length ? ' This day has no logged food, so it does not add to carry.' : date > currentDay ? ' Planned future meals do not carry forward yet.' : ''}</p></details>
             {carryIsProvisional && <p>Includes today’s provisional balance; updates as food or Garmin data changes.</p>}
             {hasPendingLoggedDays && <p className="cal-carry-pending-note">Some logged days are waiting for Garmin data. Their balances are not included yet.</p>}
             {!burned.unavailable && allowance.deferredDebt > 0 && <p className="cal-carry-debt-note">If you eat this day’s {number(budget, 1)} kcal budget, {number(allowance.deferredDebt, 1)} kcal of debt remains for later days.</p>}
-            {!burned.unavailable && allowance.deferredSurplus > 0 && <p className="cal-carry-pending-note">{number(allowance.deferredSurplus, 1)} kcal of unused credit stays banked for later days. A day’s budget rises by at most {number(MAX_DAILY_SURPLUS_CARRY)} kcal from carry.</p>}
           </section>
 
           <button className={`cal-garmin-bar ${garmin.status.state === 'needs_login' || garmin.status.state === 'error' || (garmin.status.state === 'connected' && staleImport(garmin.status.last_sync_at)) || garminLoadError ? 'cal-garmin-attention' : ''}`} onClick={() => setModal({ type: 'garmin' })} aria-label="Garmin Connect settings">
@@ -670,7 +669,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
           <section className="cal-page-heading"><div><div className="cal-eyebrow">THE DAYS ADD UP</div><h1>Your history<span className="cal-heading-dot">.</span></h1><p>A simple record, whenever you need it.</p></div><button className="cal-button" onClick={() => setModal({ type: 'transfer' })}><Icon name="download" size={18}/>Export journal</button></section>
           {hasPendingLoggedDays && <p className="cal-history-pending-note">Some logged days are waiting for Garmin data. Their balances are not included yet.</p>}
           {historyDates.length ? <div className="cal-history">
-            <div className="cal-history-header"><span>Day</span><span>Energy</span><span className="cal-history-protein">Protein</span><span className="cal-history-deficit">Deficit / surplus</span><span className="cal-history-balance">Running balance</span><span/></div>
+            <div className="cal-history-header"><span>Day</span><span>Energy</span><span className="cal-history-protein">Protein</span><span className="cal-history-deficit">Deficit / surplus</span><span className="cal-history-balance">Still to carry</span><span/></div>
             {historyDates.slice(0, historyLimit).map(day => {
               const entries = entriesByDate.get(day) ?? NO_ENTRIES;
               const dayTotal = dayTotals(entries);

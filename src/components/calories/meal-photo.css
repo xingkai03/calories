@@ -12,10 +12,10 @@
 .cal-meal-photo-row .cal-meal-photo-estimate:hover:not(:disabled) { background: #dbe6cb; }
 .cal-meal-photo-row .cal-meal-photo-estimate:disabled { opacity: .5; cursor: default; }
 .cal-meal-photo-cancel { min-height: 44px; padding: 0 4px; font-size: 12px; }
-.cal-meal-photo-status { color: #697564; font-size: 12px; line-height: 1.7; margin: 8px 0 0; }
+.cal-meal-photo-status { color: #5d6858; font-size: 12px; line-height: 1.7; margin: 8px 0 0; }
 .cal-meal-photo-status:empty { display: none; }
 .cal-meal-photo-error { border: 1px solid #ead4c7; border-radius: 7px; padding: 8px 10px; background: #fcf0e8; color: #9a5545; font-size: 12px; line-height: 1.7; margin: 9px 0 0; overflow-wrap: anywhere; }
-.cal-meal-photo-notes { padding: 0 0 0 17px; margin: 5px 0 0; font-size: 11px; line-height: 1.7; color: #697564; overflow-wrap: anywhere; }
+.cal-meal-photo-notes { padding: 0 0 0 17px; margin: 5px 0 0; font-size: 11px; line-height: 1.7; color: #5d6858; overflow-wrap: anywhere; }
 .cal-meal-photo-notes li + li { margin-top: 3px; }
 .cal-meal-photo-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #b9c7aa; border-right-color: #4f6c3f; border-radius: 50%; animation: cal-meal-photo-spin .8s linear infinite; flex: 0 0 16px; }
 @keyframes cal-meal-photo-spin { to { transform: rotate(360deg); } }

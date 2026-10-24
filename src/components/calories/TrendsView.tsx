@@ -1,14 +1,32 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TrackerData } from '../../lib/calories/model';
 import type { GarminDay } from '../../lib/calories/garmin';
 import { KCAL_PER_KG, planForRate, summarizeTrend, trendDays } from '../../lib/calories/trends';
-import { number, readableDate } from './ui';
+import { DAILY_PROTEIN_GRAMS } from '../../lib/calories/nutrition';
+import { errorMessage, number, readableDate } from './ui';
 import './trends.css';
 
 const SPANS = [7, 14, 30] as const;
-const W = 640, H = 220, PAD = { top: 12, right: 8, bottom: 26, left: 38 };
+const PAD = { top: 12, right: 8, bottom: 26, left: 38 };
 
-export default function TrendsView({ data, garminDays, currentDay }: { data: TrackerData; garminDays: readonly GarminDay[]; currentDay: string }) {
+/** A phone draws a narrower chart, so its labels stay readable instead of shrinking with the SVG. */
+function useNarrowScreen() {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 600px)');
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return narrow;
+}
+
+export default function TrendsView({ data, garminDays, currentDay, onApplyDeficit, notice }: { data: TrackerData; garminDays: readonly GarminDay[]; currentDay: string; onApplyDeficit: (deficit: number) => Promise<void>; notice: string }) {
+  const narrow = useNarrowScreen();
+  const W = narrow ? 360 : 640, H = narrow ? 240 : 220;
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState('');
   const [span, setSpan] = useState<(typeof SPANS)[number]>(14);
   const [rate, setRate] = useState(0.5);
   const days = useMemo(() => trendDays(data, garminDays, span, currentDay), [data, garminDays, span, currentDay]);
@@ -25,7 +43,7 @@ export default function TrendsView({ data, garminDays, currentDay }: { data: Tra
   // Build polyline segments that break across unknown days.
   const segments: string[][] = [[]];
   for (const point of burnPath) { if (point === null) { if (segments[segments.length - 1].length) segments.push([]); } else segments[segments.length - 1].push(point); }
-  const labelEvery = span === 7 ? 1 : span === 14 ? 2 : 5;
+  const labelEvery = narrow ? (span === 7 ? 1 : span === 14 ? 3 : 7) : (span === 7 ? 1 : span === 14 ? 2 : 5);
 
   const avgBurned = summary.avgBurned;
   const plan = avgBurned === null ? null : planForRate(avgBurned, rate);
@@ -70,8 +88,9 @@ export default function TrendsView({ data, garminDays, currentDay }: { data: Tra
           <span>Fat<strong>{number(plan.macros.fat)}</strong>g</span>
         </div>
         {plan.capped && <p className="cal-plan-note">Capped at the app’s 1,000 kcal daily deficit, so the real pace is about {number(plan.kgPerWeek, 2)} kg per week.</p>}
-        {plan.macros.budgetTooLow && <p className="cal-plan-note">This budget is too low for 175 g protein and 25% fat, so carbs show 0 g.</p>}
-        <p className="cal-plan-note">Set the deficit in Journal → Edit daily targets to apply it. Estimates only; this is not medical advice.</p>
+        {plan.macros.budgetTooLow && <p className="cal-plan-note">This budget is too low for {DAILY_PROTEIN_GRAMS} g protein and 25% fat, so carbs show 0 g.</p>}
+        <div className="cal-plan-apply"><button type="button" className="cal-button cal-button-primary" disabled={applying} onClick={async () => { setApplying(true); setApplyError(''); try { await onApplyDeficit(plan.deficit); } catch (error) { setApplyError(errorMessage(error)); } finally { setApplying(false); } }}>{applying ? 'Saving…' : `Use ${number(Math.round(plan.deficit))} kcal as my deficit`}</button>{notice && <p role="status">{notice}</p>}{applyError && <p className="cal-form-error" role="alert">{applyError}</p>}</div>
+        <p className="cal-plan-note">Applies to today and to new days. Days with their own saved targets keep them. Estimates only; this is not medical advice.</p>
       </>}
     </section>
   </>;

@@ -1,5 +1,5 @@
 .cal-trends-range { display: inline-flex; gap: 2px; padding: 4px; border: 1px solid var(--cal-border); border-radius: 100px; background: #eeeee7; margin-bottom: 20px; }
-.cal-trends-range button { border: 0; background: transparent; border-radius: 100px; padding: 8px 16px; min-height: 36px; font-size: 12px; font-weight: 550; color: #70776e; }
+.cal-trends-range button { border: 0; background: transparent; border-radius: 100px; padding: 8px 16px; min-height: 36px; font-size: 12px; font-weight: 550; color: #5c6359; }
 .cal-trends-range button[aria-pressed='true'] { background: var(--cal-panel); color: var(--cal-green); box-shadow: 0 1px 4px #263a2410; }
 .cal-trends-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
 .cal-trends-stat, .cal-trends-chart-card, .cal-plan-card { border: 1px solid var(--cal-border); border-radius: 18px; background: var(--cal-panel); padding: 18px 20px; }

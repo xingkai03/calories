@@ -7,17 +7,20 @@ function finite(value: number, label: string, nonNegative = false): number {
 }
 
 export const MAX_DAILY_DEFICIT = 1000;
+/** Most unused calories one day's budget may draw from earlier days. */
+export const MAX_DAILY_SURPLUS_CARRY = 500;
 
-/** Limit the budgeted deficit; the raw allowance retains all unpaid debt. */
+/** Limit the budgeted deficit and surplus; the raw allowance retains all unpaid debt and unused surplus. */
 export function adjustedBudget(burned: number, deficit: number, carryIn = 0) {
   finite(burned, 'calories burned', true);
   finite(deficit, 'deficit target', true);
   finite(carryIn, 'carried calorie balance');
   const baseBudget = Math.max(0, burned - deficit);
   const rawBudget = finite(baseBudget + carryIn, 'adjusted calorie budget');
-  const budget = Math.max(0, rawBudget, burned - MAX_DAILY_DEFICIT);
-  const deferredDebt = finite(budget - rawBudget, 'deferred calorie debt');
-  return { baseBudget, carryIn, rawBudget, budget, deferredDebt };
+  const budget = Math.max(0, Math.min(rawBudget, baseBudget + MAX_DAILY_SURPLUS_CARRY), burned - MAX_DAILY_DEFICIT);
+  const deferredDebt = finite(Math.max(0, budget - rawBudget), 'deferred calorie debt');
+  const deferredSurplus = finite(Math.max(0, rawBudget - budget), 'deferred calorie surplus');
+  return { baseBudget, carryIn, rawBudget, budget, deferredDebt, deferredSurplus };
 }
 
 export interface BalanceDay extends ReturnType<typeof adjustedBudget> {

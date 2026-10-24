@@ -23,6 +23,11 @@ self.addEventListener('install', event => {
   // Let the normal waiting lifecycle keep existing windows on their current build.
 });
 
+// The page asks for this only after the user chooses to reload into the new build.
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'calories-skip-waiting') self.skipWaiting();
+});
+
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const names = await caches.keys();

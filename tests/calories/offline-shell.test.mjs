@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
@@ -16,7 +17,7 @@ const graph = new Map([
   ['/_astro/register.a.js', []],
 ]);
 async function fixture(t) {
-  const directory = await mkdtemp('/private/tmp/calories-pwa-');
+  const directory = await mkdtemp(path.join(tmpdir(), 'calories-pwa-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const files = new Map([
     ['/calories/index.html', '<html><head><link href=\'/calories/manifest.webmanifest\' rel=\'manifest\'><link href=\'/_astro/calories.a.css\' rel=\'stylesheet\'></head><body><script src=\'/_astro/register.a.js\'></script><script>navigator.serviceWorker.register(\'/calories/sw.js\')</script><astro-island component-url=\'/_astro/app.a.js\' renderer-url=\'/_astro/renderer.a.js\'></astro-island><a href=\'/about/\'>Home</a></body></html>'],

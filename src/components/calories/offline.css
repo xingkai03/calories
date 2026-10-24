@@ -12,7 +12,7 @@
   gap: 18px;
 }
 .cal-offline-notice strong, .cal-draft-recovery > div > strong { font-size: 13px; font-weight: 600; }
-.cal-offline-notice p, .cal-draft-recovery p { margin: 5px 0 0; font-size: 12px; line-height: 1.65; color: #697564; }
+.cal-offline-notice p, .cal-draft-recovery p { margin: 5px 0 0; font-size: 12px; line-height: 1.65; color: #5d6858; }
 .cal-offline-notice > button { flex-shrink: 0; }
 .cal-sync-device, .cal-sync-offline { color: #536a46; }
 .cal-draft-recovery { padding: 18px 22px; margin-bottom: 28px; border: 1px solid #dfe4d6; border-radius: 12px; background: #fffefa; }

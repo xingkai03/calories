@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_DAILY_DEFICIT, adjustedBudget, calorieLedger, carryBefore } from '../../src/lib/calories/budget.ts';
+import { MAX_DAILY_DEFICIT, MAX_DAILY_SURPLUS_CARRY, adjustedBudget, calorieLedger, carryBefore } from '../../src/lib/calories/budget.ts';
 import { emptyData, manualMealEntry } from '../../src/lib/calories/model.ts';
 import { effectiveBurned } from '../../src/lib/calories/garmin.ts';
 
@@ -25,17 +25,26 @@ const threeDays = () => dataWith([
 
 test('adjusted budget preserves signed carry while capping the displayed daily deficit', () => {
   assert.deepEqual(adjustedBudget(3200, 500, 300), {
-    baseBudget: 2700, carryIn: 300, rawBudget: 3000, budget: 3000, deferredDebt: 0,
+    baseBudget: 2700, carryIn: 300, rawBudget: 3000, budget: 3000, deferredDebt: 0, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(1000, 500, -900), {
-    baseBudget: 500, carryIn: -900, rawBudget: -400, budget: 0, deferredDebt: 400,
+    baseBudget: 500, carryIn: -900, rawBudget: -400, budget: 0, deferredDebt: 400, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(100, 500, 0), {
-    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0,
+    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(0, 0), {
-    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0,
+    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0, deferredSurplus: 0,
   });
+});
+
+test('positive carry raises one day by at most the surplus cap and keeps the rest banked', () => {
+  assert.equal(MAX_DAILY_SURPLUS_CARRY, 500);
+  assert.deepEqual(adjustedBudget(2300, 500, 6000), {
+    baseBudget: 1800, carryIn: 6000, rawBudget: 7800, budget: 2300, deferredDebt: 0, deferredSurplus: 5500,
+  });
+  assert.equal(adjustedBudget(2300, 500, 500).budget, 2300);
+  assert.equal(adjustedBudget(2300, 500, 499).deferredSurplus, 0);
 });
 
 test('unused and excess calories accumulate once across three completed days', () => {
@@ -305,25 +314,25 @@ test('explicit manual zero and an imported Garmin zero are available completed b
 test('the exact 1000 kcal deficit boundary leaves no deferral, with fractional excess retained', () => {
   assert.equal(MAX_DAILY_DEFICIT, 1000);
   assert.deepEqual(adjustedBudget(3200, 500, -500), {
-    baseBudget: 2700, carryIn: -500, rawBudget: 2200, budget: 2200, deferredDebt: 0,
+    baseBudget: 2700, carryIn: -500, rawBudget: 2200, budget: 2200, deferredDebt: 0, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(3200, 500, -500.25), {
-    baseBudget: 2700, carryIn: -500.25, rawBudget: 2199.75, budget: 2200, deferredDebt: 0.25,
+    baseBudget: 2700, carryIn: -500.25, rawBudget: 2199.75, budget: 2200, deferredDebt: 0.25, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(3200, 500, -499.75), {
-    baseBudget: 2700, carryIn: -499.75, rawBudget: 2200.25, budget: 2200.25, deferredDebt: 0,
+    baseBudget: 2700, carryIn: -499.75, rawBudget: 2200.25, budget: 2200.25, deferredDebt: 0, deferredSurplus: 0,
   });
 });
 
 test('burned calories below 1000 keep a zero allowance floor without erasing negative raw debt', () => {
   assert.deepEqual(adjustedBudget(900, 200, -900), {
-    baseBudget: 700, carryIn: -900, rawBudget: -200, budget: 0, deferredDebt: 200,
+    baseBudget: 700, carryIn: -900, rawBudget: -200, budget: 0, deferredDebt: 200, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(0, 0, -50), {
-    baseBudget: 0, carryIn: -50, rawBudget: -50, budget: 0, deferredDebt: 50,
+    baseBudget: 0, carryIn: -50, rawBudget: -50, budget: 0, deferredDebt: 50, deferredSurplus: 0,
   });
   assert.deepEqual(adjustedBudget(1000, 1000, 0), {
-    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0,
+    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0, deferredSurplus: 0,
   });
 });
 
@@ -372,9 +381,9 @@ test('partial repayment and repeated overspending adjust the remaining debt with
   assert.equal(rows.at(-1).balance, rows.length * 2700 - data.entries.reduce((sum, entry) => sum + entry.calories, 0));
 });
 
-test('positive credit remains spendable even when the adjusted budget is above calories burned', () => {
+test('positive credit stays spendable up to the daily surplus cap, with the rest kept for later days', () => {
   assert.deepEqual(adjustedBudget(3200, 500, 1200), {
-    baseBudget: 2700, carryIn: 1200, rawBudget: 3900, budget: 3900, deferredDebt: 0,
+    baseBudget: 2700, carryIn: 1200, rawBudget: 3900, budget: 3200, deferredDebt: 0, deferredSurplus: 700,
   });
   const ledger = calorieLedger(dataWith([
     meal('2026-10-09', 2300), meal('2026-10-10', 3000), meal('2026-10-11', 2800),
@@ -386,7 +395,7 @@ test('positive credit remains spendable even when the adjusted budget is above c
 
 test('a custom base deficit above 1000 is capped without deleting its unpaid portion', () => {
   assert.deepEqual(adjustedBudget(3200, 1500, 0), {
-    baseBudget: 1700, carryIn: 0, rawBudget: 1700, budget: 2200, deferredDebt: 500,
+    baseBudget: 1700, carryIn: 0, rawBudget: 1700, budget: 2200, deferredDebt: 500, deferredSurplus: 0,
   });
   const data = dataWith([
     meal('2026-10-09', 2200), meal('2026-10-10', 2200),

@@ -40,7 +40,9 @@ test('positive provisional credit feeds every future row once; planned future me
   for (const date of [TOMORROW, LATER]) {
     close(carryBefore(date, ledger), 1556.4);
     close(ledger.days[date].carryIn, carryBefore(date, ledger));
-    close(ledger.days[date].budget, 3496.4);
+    // Base 1940 plus at most 500 of the 1556.4 credit; the rest stays in the balance.
+    close(ledger.days[date].budget, 2440);
+    close(ledger.days[date].deferredSurplus, 1056.4);
     assert.equal(ledger.days[date].settled, false);
   }
   close(ledger.days[TOMORROW].balance, 3396.4);

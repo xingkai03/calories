@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { energyFromMacros, macrosForFood, manualMealEntry, normalizeData, todayISO, type DaySettings, type Entry, type Food, type TrackerData } from '../../lib/calories/model';
 import { effectiveBurned, type GarminDay, type GarminSnapshot, type GarminStatus } from '../../lib/calories/garmin';
 import { DAILY_PROTEIN_GRAMS, macroTargets } from '../../lib/calories/nutrition';
-import { adjustedBudget, MAX_DAILY_DEFICIT } from '../../lib/calories/budget';
+import { adjustedBudget, MAX_DAILY_DEFICIT, MAX_DAILY_SURPLUS_CARRY } from '../../lib/calories/budget';
 import { normalizeFoodPhotoDraft, type FoodPhotoDraft, type FoodPhotoRequest } from '../../lib/calories/food-photos';
 import FoodPhotoImport from './FoodPhotoImport';
 import MealPhotoImport from './MealPhotoImport';
@@ -10,23 +10,26 @@ import { normalizeMealPhotoDraft, type MealPhotoDraft, type MealPhotoRequest } f
 import { usePersistentFormDraft, DraftRestoredNotice } from './FormDrafts';
 import { Icon, ModalHeader, NumericField, number, signedNumber, readableDate, downloadFile, errorMessage, newId, unitLabel, previewNumber, syncTime, burnedFormula, burnedSyncTime, staleImport, garminStatusLabel, garminErrorMeaning } from './ui';
 
-export function EntryEditor({ entry, initialFoodId, foods, date, onSave, readMealPhoto, onAddFood, onFoodBank, bankCount, onClose }: { entry?: Entry; initialFoodId?: string; foods: Food[]; date: string; onSave: (entry: Entry, originalRecordJson: string) => void | Promise<void>; readMealPhoto: (input: MealPhotoRequest, signal: AbortSignal) => Promise<MealPhotoDraft>; onAddFood: () => void; onFoodBank: () => void; bankCount: number; onClose: () => void }) {
+export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities = {}, foods, date, onSave, readMealPhoto, onAddFood, onFoodBank, bankCount, onClose }: { entry?: Entry; initialFoodId?: string; initialMeal?: string; lastQuantities?: Record<string, number>; foods: Food[]; date: string; onSave: (entry: Entry, originalRecordJson: string) => void | Promise<void>; readMealPhoto: (input: MealPhotoRequest, signal: AbortSignal) => Promise<MealPhotoDraft>; onAddFood: () => void; onFoodBank: () => void; bankCount: number; onClose: () => void }) {
   const manualEditing = entry?.source === 'manual' || Boolean(entry && entry.foodId === `manual:${entry.id}`);
   const initialFood = foods.find(food => food.id === (manualEditing ? initialFoodId : entry?.foodId ?? initialFoodId)) ?? foods[0];
   const standardMeals = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  // A new food starts at the amount last logged; otherwise at the label quantity.
+  const startQuantity = (food: Food) => String(lastQuantities[food.id] ?? food.baseQuantity);
+  const newMeal = initialMeal ?? mealForTime();
   const form = usePersistentFormDraft(entry ? `entry:${entry.id}` : 'entry:new', {
     draftEntryId: entry?.id ?? newId(),
     originalRecordJson: JSON.stringify(entry ?? null),
     mode: (entry ? manualEditing ? 'manual' : 'library' : foods.length ? 'library' : 'manual') as 'library' | 'manual',
     foodId: manualEditing ? '' : entry ? entry.foodId : initialFood?.id ?? '', foodFilter: '',
-    quantity: String(!manualEditing && entry ? entry.quantity : initialFood?.baseQuantity ?? 100),
+    quantity: !manualEditing && entry ? String(entry.quantity) : initialFood ? startQuantity(initialFood) : '100',
     manualName: manualEditing ? entry?.foodName ?? '' : '',
     manualNutrients: { protein: manualEditing ? String(entry?.protein ?? '') : '', carbs: manualEditing ? String(entry?.carbs ?? '') : '', fat: manualEditing ? String(entry?.fat ?? '') : '', fiber: manualEditing ? String(entry?.fiber ?? '') : '' },
-    mealChoice: entry ? (standardMeals.includes(entry.meal) ? entry.meal : 'Custom') : 'Breakfast', customMeal: entry?.meal ?? '', entryDate: entry?.date ?? date,
+    mealChoice: (meal => standardMeals.includes(meal) ? meal : 'Custom')(entry?.meal ?? newMeal), customMeal: entry?.meal ?? (standardMeals.includes(newMeal) ? '' : newMeal), entryDate: entry?.date ?? date,
   }, value => ({ kind: 'entry', label: entry ? `Edit ${entry.foodName}` : value.manualName.trim() || 'New food entry', ...(value.entryDate ? { date: value.entryDate } : {}), ...(entry ? { entryId: entry.id } : value.mode === 'library' && value.foodId ? { foodId: value.foodId } : {}) }));
   useEffect(() => {
     const explicitFood = !entry && initialFoodId ? foods.find(food => food.id === initialFoodId) : undefined;
-    if (explicitFood && form.draft.mode === 'library' && form.draft.foodId !== explicitFood.id) form.setDraft(current => ({ ...current, foodId: explicitFood.id, foodFilter: '', quantity: String(explicitFood.baseQuantity) }));
+    if (explicitFood && form.draft.mode === 'library' && form.draft.foodId !== explicitFood.id) form.setDraft(current => ({ ...current, foodId: explicitFood.id, foodFilter: '', quantity: startQuantity(explicitFood) }));
   }, [entry?.id, initialFoodId]);
   const [mode, setMode] = form.field('mode');
   const [foodId, setFoodId] = form.field('foodId');
@@ -54,14 +57,14 @@ export function EntryEditor({ entry, initialFoodId, foods, date, onSave, readMea
     setFoodFilter(value);
     const first = choices.find(food => matches(food, value));
     setFoodId(first?.id ?? '');
-    if (first && first.id !== foodId) setQuantity(String(first.baseQuantity));
+    if (first && first.id !== foodId) setQuantity(startQuantity(first));
     setError('');
   }
   function changeMode(next: 'library' | 'manual') {
     if (next === 'library' && !selectedFood) {
       const first = filteredFoods[0];
       setFoodId(first?.id ?? '');
-      if (first) setQuantity(String(first.baseQuantity));
+      if (first) setQuantity(startQuantity(first));
     }
     setMode(next); setError('');
   }
@@ -105,7 +108,7 @@ export function EntryEditor({ entry, initialFoodId, foods, date, onSave, readMea
       {mode === 'manual' && <fieldset className="cal-food-editor-fields" disabled={submitting}><MealPhotoImport readPhoto={readMealPhoto} description={manualName} onDraft={applyMealPhoto} onBusyChange={setPhotoBusy}/></fieldset>}
       <fieldset className="cal-form cal-food-editor-fields" disabled={photoBusy || submitting}>
       {mode === 'library' ? <>
-        <div className="cal-food-picker" role="group" aria-labelledby="cal-entry-food-label"><label id="cal-entry-food-label" htmlFor="cal-entry-food-filter">Food</label><div className="cal-food-picker-controls"><input id="cal-entry-food-filter" type="text" aria-label="Filter foods" aria-describedby="cal-entry-food-matches" value={foodFilter} onChange={event => filterFoods(event.target.value)} placeholder="Type part of a food name" autoComplete="off" autoCapitalize="none" spellCheck={false} autoFocus/><select aria-label="Food" aria-describedby="cal-entry-food-matches" value={foodId} onChange={event => { const food = filteredFoods.find(item => item.id === event.target.value); setFoodId(food?.id ?? ''); if (food) setQuantity(String(food.baseQuantity)); setError(''); }} required disabled={filteredFoods.length === 0}>{filteredFoods.length === 0 && <option value="" disabled>No matching foods</option>}{filteredFoods.map(food => <option key={food.id} value={food.id}>{food.name}{food.id === savedFood?.id ? ' (saved entry)' : ''} · {food.state}</option>)}</select></div><small className="cal-field-hint" id="cal-entry-food-matches" role="status">{filteredFoods.length === 0 ? foods.length === 0 && !savedFood ? 'Your library is empty. Add a food below or choose Manual estimate.' : 'No matching foods. Try another name or add a food below.' : foodFilter.trim() ? `${filteredFoods.length} matching ${filteredFoods.length === 1 ? 'food' : 'foods'}` : 'Type to filter the food list.'}</small></div>
+        <div className="cal-food-picker" role="group" aria-labelledby="cal-entry-food-label"><label id="cal-entry-food-label" htmlFor="cal-entry-food-filter">Food</label><div className="cal-food-picker-controls"><input id="cal-entry-food-filter" type="text" aria-label="Filter foods" aria-describedby="cal-entry-food-matches" value={foodFilter} onChange={event => filterFoods(event.target.value)} placeholder="Type part of a food name" autoComplete="off" autoCapitalize="none" spellCheck={false} autoFocus/><select aria-label="Food" aria-describedby="cal-entry-food-matches" value={foodId} onChange={event => { const food = filteredFoods.find(item => item.id === event.target.value); setFoodId(food?.id ?? ''); if (food) setQuantity(startQuantity(food)); setError(''); }} required disabled={filteredFoods.length === 0}>{filteredFoods.length === 0 && <option value="" disabled>No matching foods</option>}{filteredFoods.map(food => <option key={food.id} value={food.id}>{food.name}{food.id === savedFood?.id ? ' (saved entry)' : ''} · {food.state}</option>)}</select></div><small className="cal-field-hint" id="cal-entry-food-matches" role="status">{filteredFoods.length === 0 ? foods.length === 0 && !savedFood ? 'Your library is empty. Add a food below or choose Manual estimate.' : 'No matching foods. Try another name or add a food below.' : foodFilter.trim() ? `${filteredFoods.length} matching ${filteredFoods.length === 1 ? 'food' : 'foods'}` : 'Type to filter the food list.'}</small></div>
         <button className="cal-text-button cal-add-food-inline" type="button" onClick={onAddFood}><Icon name="plus" size={15}/>Add a new food to your library</button>
       </> : <>
         <label>Meal / restaurant name<input value={manualName} onChange={event => { setManualName(event.target.value); setError(''); }} placeholder="e.g. Restaurant lunch" required maxLength={160} autoFocus/></label>
@@ -121,6 +124,12 @@ export function EntryEditor({ entry, initialFoodId, foods, date, onSave, readMea
       <div className="cal-modal-actions"><button className="cal-button" type="button" onClick={closeEditor} disabled={submitting}>Cancel</button><button className="cal-button cal-button-primary" disabled={submitting || photoBusy || (mode === 'library' && !selectedFood)}>{submitting ? 'Saving…' : entry ? 'Save changes' : 'Add to journal'}<Icon name="check" size={17}/></button></div>
     </form>
   </>;
+}
+
+/** New entries start on the meal that fits the time of day. */
+function mealForTime(now = new Date()): string {
+  const hour = now.getHours();
+  return hour >= 4 && hour < 11 ? 'Breakfast' : hour >= 11 && hour < 15 ? 'Lunch' : hour >= 17 && hour < 22 ? 'Dinner' : 'Snack';
 }
 
 export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food; readPhotos: (input: FoodPhotoRequest, signal: AbortSignal) => Promise<FoodPhotoDraft>; onSave: (food: Food, originalRecordJson: string) => void | Promise<void>; onClose: () => void }) {
@@ -219,11 +228,12 @@ export function TargetsEditor({ date, currentDay, settings, defaultSettings, gar
       </>}
       <NumericField label="Deficit target for this date" value={deficit} onChange={setDeficit} unit="kcal" describedBy="cal-deficit-date-hint"/>
       <label>Daily protein target<span className="cal-unit-input"><input type="number" value={DAILY_PROTEIN_GRAMS} readOnly aria-describedby="cal-macro-rule"/><span>g</span></span></label>
-      <p className="cal-field-hint" id="cal-macro-rule">Protein: 175 g/day. Fat: 25% of daily budget. Carbs: remaining energy after protein and fat. Fibre: 0.014 g per kcal of daily budget.</p>
-      <div className="cal-budget-preview"><span>{carryIsProvisional ? 'Provisional food budget with carry' : resolved.predicted ? 'Predicted food budget with carry' : 'Food budget with carry'}</span><strong>{number(previewBudget, 1)} kcal</strong><div className="cal-target-carry-preview"><span>Base budget<strong>{number(previewAllowance.baseBudget, 1)} kcal</strong></span><span>Carry from earlier days{carryIsProvisional ? ' (provisional)' : ''}<strong>{signedNumber(carryIn)} kcal</strong></span></div><p>Base budget is calories burned minus the deficit target, with a minimum of 0. Carry adjusts the food budget, with the budgeted deficit limited to {number(MAX_DAILY_DEFICIT)} kcal/day.</p><div className="cal-target-macro-preview"><span>Protein<strong>{number(nutritionTargets.protein, 1)} g</strong></span><span>Carbs<strong>{number(nutritionTargets.carbs, 1)} g</strong></span><span>Fat<strong>{number(nutritionTargets.fat, 1)} g</strong></span><span>Fibre<strong>{number(nutritionTargets.fiber, 1)} g</strong></span></div></div>
+      <p className="cal-field-hint" id="cal-macro-rule">Protein: {DAILY_PROTEIN_GRAMS} g/day. Fat: 25% of daily budget. Carbs: remaining energy after protein and fat. Fibre: 0.014 g per kcal of daily budget.</p>
+      <div className="cal-budget-preview"><span>{carryIsProvisional ? 'Provisional food budget with carry' : resolved.predicted ? 'Predicted food budget with carry' : 'Food budget with carry'}</span><strong>{number(previewBudget, 1)} kcal</strong><div className="cal-target-carry-preview"><span>Base budget<strong>{number(previewAllowance.baseBudget, 1)} kcal</strong></span><span>Carry from earlier days{carryIsProvisional ? ' (provisional)' : ''}<strong>{signedNumber(carryIn)} kcal</strong></span></div><p>Base budget is calories burned minus the deficit target, with a minimum of 0. Carry adjusts the food budget: at most {number(MAX_DAILY_DEFICIT)} kcal below burned, and at most {number(MAX_DAILY_SURPLUS_CARRY)} kcal above the base budget.</p><div className="cal-target-macro-preview"><span>Protein<strong>{number(nutritionTargets.protein, 1)} g</strong></span><span>Carbs<strong>{number(nutritionTargets.carbs, 1)} g</strong></span><span>Fat<strong>{number(nutritionTargets.fat, 1)} g</strong></span><span>Fibre<strong>{number(nutritionTargets.fiber, 1)} g</strong></span></div></div>
       {carryIsProvisional && <p className="cal-field-hint">Includes today’s provisional balance; updates as food or Garmin data changes.</p>}
       {!resolved.unavailable && previewAllowance.deferredDebt > 0 && <p className="cal-macro-budget-note">If you eat this {number(previewBudget, 1)} kcal budget, {number(previewAllowance.deferredDebt, 1)} kcal of debt remains for later days.</p>}
-      {nutritionTargets.budgetTooLow && <p className="cal-macro-budget-note">Current calorie budget is too low for 175 g protein and 25% fat. Carb target is 0 g.</p>}
+      {!resolved.unavailable && previewAllowance.deferredSurplus > 0 && <p className="cal-field-hint">{number(previewAllowance.deferredSurplus, 1)} kcal of unused credit stays banked for later days. A day’s budget rises by at most {number(MAX_DAILY_SURPLUS_CARRY)} kcal from carry.</p>}
+      {nutritionTargets.budgetTooLow && <p className="cal-macro-budget-note">Current calorie budget is too low for {DAILY_PROTEIN_GRAMS} g protein and 25% fat. Carb target is 0 g.</p>}
       <label className="cal-checkbox"><input type="checkbox" checked={makeDefault} onChange={event => setMakeDefault(event.target.checked)}/><span>Use this deficit target as my default<small>Applies to days without their own saved targets. Manual calories burned applies only to this date; new days use Garmin.</small></span></label>
       </fieldset>
       {error && <p className="cal-form-error" role="alert">{error}</p>}
@@ -298,9 +308,13 @@ export function TransferDialog({ data, onImport, onClose }: { data: TrackerData;
   async function restoreBackup() {
     if (!incoming || busy) return;
     setBusy(true); setError('');
-    try { await onImport(incoming); }
+    try {
+      // Keep a copy of the journal being replaced; a restore can't be undone in the app.
+      downloadFile(JSON.stringify(data, null, 2), `calories-before-restore-${exportDate}.json`, 'application/json');
+      await onImport(incoming);
+    }
     catch (error) { setError(errorMessage(error)); }
     finally { setBusy(false); }
   }
-  return <><ModalHeader title="Keep a copy of your days" eyebrow="BACKUP & IMPORT" onClose={onClose}/><p className="cal-modal-intro">Download your journal whenever you like.</p><div className="cal-transfer-option"><div><strong>Complete backup</strong><p>Foods, food bank portions, journal entries, and targets in a JSON file. Use this to restore your journal.</p></div><button className="cal-button cal-button-small" onClick={() => downloadFile(JSON.stringify(data, null, 2), `calories-backup-${exportDate}.json`, 'application/json')}><Icon name="download" size={16}/>JSON</button></div><div className="cal-transfer-option"><div><strong>Spreadsheet export</strong><p>All logged entries, quantities, and nutrition. Opens in Numbers or Google Sheets.</p></div><button className="cal-button cal-button-small" onClick={exportCSV}><Icon name="download" size={16}/>CSV</button></div><div className="cal-import-section"><h3>Restore a backup</h3><p>Choose a JSON file previously exported from this app.</p><label className="cal-file-label">{busy ? 'Reading backup…' : 'Choose JSON backup'}<input type="file" accept=".json,application/json" onChange={event => void selectFile(event.target.files?.[0])} disabled={busy}/></label>{incoming && <div className="cal-import-confirm"><strong>{filename}</strong><p>{incoming.foods.length} foods · {incoming.foodBank.length} bank portions · {incoming.entries.length} entries</p><p>This will replace your current journal, food library, food bank, and targets on every device. Export a backup first if you want to keep them.</p><button className="cal-button cal-button-danger cal-button-small" disabled={busy} onClick={() => void restoreBackup()}>Replace journal with this backup</button></div>}{error && <p className="cal-form-error" role="alert">{error}</p>}</div><div className="cal-modal-actions"><button className="cal-button cal-button-primary" onClick={onClose}>Done</button></div></>;
+  return <><ModalHeader title="Keep a copy of your days" eyebrow="BACKUP & IMPORT" onClose={onClose}/><p className="cal-modal-intro">Download your journal whenever you like.</p><div className="cal-transfer-option"><div><strong>Complete backup</strong><p>Foods, food bank portions, journal entries, and targets in a JSON file. Use this to restore your journal.</p></div><button className="cal-button cal-button-small" onClick={() => downloadFile(JSON.stringify(data, null, 2), `calories-backup-${exportDate}.json`, 'application/json')}><Icon name="download" size={16}/>JSON</button></div><div className="cal-transfer-option"><div><strong>Spreadsheet export</strong><p>All logged entries, quantities, and nutrition. Opens in Numbers or Google Sheets.</p></div><button className="cal-button cal-button-small" onClick={exportCSV}><Icon name="download" size={16}/>CSV</button></div><div className="cal-import-section"><h3>Restore a backup</h3><p>Choose a JSON file previously exported from this app.</p><label className="cal-file-label">{busy ? 'Reading backup…' : 'Choose JSON backup'}<input type="file" accept=".json,application/json" onChange={event => void selectFile(event.target.files?.[0])} disabled={busy}/></label>{incoming && <div className="cal-import-confirm"><strong>{filename}</strong><p>{incoming.foods.length} foods · {incoming.foodBank.length} bank portions · {incoming.entries.length} entries</p><p>This will replace your current journal, food library, food bank, and targets on every device. A copy of your current journal downloads first, so you can restore it if needed.</p><button className="cal-button cal-button-danger cal-button-small" disabled={busy} onClick={() => void restoreBackup()}>Replace journal with this backup</button></div>}{error && <p className="cal-form-error" role="alert">{error}</p>}</div><div className="cal-modal-actions"><button className="cal-button cal-button-primary" onClick={onClose}>Done</button></div></>;
 }

@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { macrosForFood, type BankPortion, type Food, type Macros } from '../../lib/calories/model';
 import { prepareFoodBankPortions } from '../../lib/calories/food-bank';
+import { mealForTime } from '../../lib/calories/food-order';
 import { DraftRestoredNotice, usePersistentFormDraft } from './FormDrafts';
 import './food-bank.css';
 
@@ -119,7 +120,7 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
 
 export function FoodBankConsume({ portion, date, onSave, onClose }: { portion: BankPortion; date: string; onSave: (date: string, meal: string) => void | Promise<void>; onClose: () => void }) {
   const [entryDate, setEntryDate] = useState(date);
-  const [meal, setMeal] = useState('Lunch');
+  const [meal, setMeal] = useState<string>(() => mealForTime());
   const [customMeal, setCustomMeal] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);

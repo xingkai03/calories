@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_DAILY_DEFICIT, MAX_DAILY_SURPLUS_CARRY, adjustedBudget, calorieLedger, carryBefore } from '../../src/lib/calories/budget.ts';
+import { CARRY_SPREAD_DAYS, MAX_DAILY_DEFICIT, adjustedBudget, calorieLedger, carryBefore, outstandingAfter } from '../../src/lib/calories/budget.ts';
 import { emptyData, manualMealEntry } from '../../src/lib/calories/model.ts';
 import { effectiveBurned } from '../../src/lib/calories/garmin.ts';
 
@@ -23,37 +23,77 @@ const threeDays = () => dataWith([
   meal('2026-10-10', 2900),
 ]);
 
-test('adjusted budget preserves signed carry while capping the displayed daily deficit', () => {
-  assert.deepEqual(adjustedBudget(3200, 500, 300), {
-    baseBudget: 2700, carryIn: 300, rawBudget: 3000, budget: 3000, deferredDebt: 0, deferredSurplus: 0,
+const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-6, `${message ?? ''} expected ${expected}, got ${actual}`);
+const closeAll = (actual, expected, message) => { assert.equal(actual.length, expected.length, message); actual.forEach((value, index) => close(value, expected[index], message)); };
+const range = (first, count) => Array.from({ length: count }, (_, index) => {
+  const date = new Date(`${first}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + index); return date.toISOString().slice(0, 10);
+});
+/** Logs each day so that it eats exactly its own budget plus `over[i]` (positive = over budget). */
+function eatAgainstBudget(dates, over, defaults, currentDay) {
+  const entries = [];
+  dates.forEach((date, index) => {
+    const ledger = calorieLedger(dataWith(entries, defaults), [], currentDay);
+    const budget = adjustedBudget(defaults.burned, defaults.deficit, carryBefore(date, ledger)).budget;
+    entries.push(meal(date, budget + (over[index] ?? 0)));
   });
-  assert.deepEqual(adjustedBudget(1000, 500, -900), {
-    baseBudget: 500, carryIn: -900, rawBudget: -400, budget: 0, deferredDebt: 400, deferredSurplus: 0,
-  });
-  assert.deepEqual(adjustedBudget(100, 500, 0), {
-    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0, deferredSurplus: 0,
-  });
-  assert.deepEqual(adjustedBudget(0, 0), {
-    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0, deferredSurplus: 0,
-  });
+  return calorieLedger(dataWith(entries, defaults), [], currentDay);
+}
+const kai = settings(2500, 660); // base budget 1840
+
+test('a day budget is base budget plus carry, never below zero', () => {
+  assert.equal(CARRY_SPREAD_DAYS, 7);
+  assert.equal(MAX_DAILY_DEFICIT, 1000, 'still the Trends planner cap');
+  assert.deepEqual(adjustedBudget(3200, 500, 300), { baseBudget: 2700, carryIn: 300, rawBudget: 3000, budget: 3000, deferredDebt: 0 });
+  assert.deepEqual(adjustedBudget(1000, 500, -900), { baseBudget: 500, carryIn: -900, rawBudget: -400, budget: 0, deferredDebt: 400 });
+  assert.deepEqual(adjustedBudget(100, 500, 0), { baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0 });
+  assert.deepEqual(adjustedBudget(0, 0), { baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0 });
+  assert.deepEqual(adjustedBudget(3200, 500, 1200), { baseBudget: 2700, carryIn: 1200, rawBudget: 3900, budget: 3900, deferredDebt: 0 });
 });
 
-test('positive carry raises one day by at most the surplus cap and keeps the rest banked', () => {
-  assert.equal(MAX_DAILY_SURPLUS_CARRY, 500);
-  assert.deepEqual(adjustedBudget(2300, 500, 6000), {
-    baseBudget: 1800, carryIn: 6000, rawBudget: 7800, budget: 2300, deferredDebt: 0, deferredSurplus: 5500,
-  });
-  assert.equal(adjustedBudget(2300, 500, 500).budget, 2300);
-  assert.equal(adjustedBudget(2300, 500, 499).deferredSurplus, 0);
+test('one big day is paid back in seven equal parts, then the budget returns to base', () => {
+  const dates = range('2026-10-01', 10);
+  const ledger = eatAgainstBudget(dates, [1500], kai, '2026-10-20');
+  const rows = dates.map(date => ledger.days[date]);
+  closeAll(rows.map(row => row.budget), [1840, ...Array(7).fill(1840 - 1500 / 7), 1840, 1840]);
+  closeAll(rows.map(row => row.difference), [-1500, 0, 0, 0, 0, 0, 0, 0, 0, 0], 'eating exactly the budget adds no new carry');
+  closeAll(rows.map(row => row.balance), [-1500, -1500 * 6 / 7, -1500 * 5 / 7, -1500 * 4 / 7, -1500 * 3 / 7, -1500 * 2 / 7, -1500 / 7, 0, 0, 0]);
 });
 
-test('unused and excess calories accumulate once across three completed days', () => {
+test('under-eating spreads the credit over the next seven days', () => {
+  const dates = range('2026-10-01', 9);
+  const ledger = eatAgainstBudget(dates, [-340], kai, '2026-10-20');
+  closeAll(dates.map(date => ledger.days[date].budget), [1840, ...Array(7).fill(1840 + 340 / 7), 1840]);
+  const sick = eatAgainstBudget(dates, [-1200], kai, '2026-10-20');
+  close(sick.days['2026-10-02'].budget, 1840 + 1200 / 7, 'a large credit raises each day by a seventh, not all at once');
+});
+
+test('overlapping differences add up and each one ends after its own seven days', () => {
+  // Saturday 800 over, Sunday 600 over its own (already reduced) budget.
+  const dates = range('2026-10-03', 10);
+  const ledger = eatAgainstBudget(dates, [800, 600], kai, '2026-10-20');
+  const budgets = dates.map(date => ledger.days[date].budget);
+  close(budgets[1], 1840 - 800 / 7, 'Sunday');
+  for (const index of [2, 3, 4, 5, 6, 7]) close(budgets[index], 1840 - 200, 'Monday to the next Saturday');
+  close(budgets[8], 1840 - 600 / 7, 'next Sunday: only Sunday is still being repaid');
+  close(budgets[9], 1840, 'next Monday');
+});
+
+test('a day only receives carry from the previous seven calendar days', () => {
+  const ledger = calorieLedger(dataWith([meal('2026-10-01', 1700)]), [], today);
+  close(ledger.days['2026-10-01'].difference, 1000);
+  for (const date of range('2026-10-02', 7)) close(carryBefore(date, ledger), 1000 / 7, date);
+  assert.equal(carryBefore('2026-10-09', ledger), 0);
+  assert.equal(carryBefore('2026-09-30', ledger), 0);
+  assert.equal(carryBefore(today, calorieLedger(emptyData(), [], today)), 0);
+});
+
+test('three completed days spread their differences once', () => {
   const ledger = calorieLedger(threeDays(), [], today);
   assert.deepEqual(ledger.completed.map(day => day.date), ['2026-10-09', '2026-10-10', '2026-10-11']);
-  assert.deepEqual(ledger.completed.map(day => day.carryIn), [0, 300, 100]);
-  assert.deepEqual(ledger.completed.map(day => day.rawBudget), [2700, 3000, 2800]);
-  assert.deepEqual(ledger.completed.map(day => day.balance), [300, 100, 200]);
-  assert.equal(carryBefore(today, ledger), 200, '300 - 200 + 100; previous carry is never counted twice');
+  closeAll(ledger.completed.map(day => day.carryIn), [0, 300 / 7, (300 - 1100 / 7) / 7]);
+  closeAll(ledger.completed.map(day => day.difference), [300, -1100 / 7, 2700 + (300 - 1100 / 7) / 7 - 2600]);
+  closeAll(ledger.completed.map(day => day.balance), [300, 100, 200], 'unpaid differences still to come');
+  close(carryBefore(today, ledger), ledger.completed.reduce((sum, day) => sum + day.difference, 0) / 7);
   assert.ok(ledger.completed.every(day => day.settled));
 });
 
@@ -67,42 +107,30 @@ test('every meal snapshot contributes to its day, independent of entry order', (
   const ledger = calorieLedger(data, [], today);
   assert.equal(ledger.days['2026-10-09'].eaten, 2400);
   assert.equal(ledger.days['2026-10-10'].eaten, 3000);
-  assert.equal(ledger.days['2026-10-10'].balance, 0);
 });
 
-test('gaps, settings-only days and Garmin-only dates do not create unused-calorie credit', () => {
+test('gaps, settings-only days and Garmin-only dates do not create carry', () => {
   const data = dataWith([meal('2026-10-09', 2400), meal('2026-10-11', 2800)]);
   data.days['2026-10-10'] = settings(8000, 0);
   const ledger = calorieLedger(data, [reading('2026-10-08', 2000, 2500), reading('2026-10-10', 5000, 2500)], today);
   assert.deepEqual(Object.keys(ledger.days).sort(), ['2026-10-09', '2026-10-11']);
-  assert.equal(ledger.days['2026-10-11'].carryIn, 300);
-  assert.equal(carryBefore(today, ledger), 200);
-  assert.equal(carryBefore('2026-10-10', ledger), 300);
+  close(ledger.days['2026-10-11'].carryIn, 300 / 7);
+  close(carryBefore('2026-10-10', ledger), 300 / 7);
+  close(carryBefore(today, ledger), (300 + 2700 + 300 / 7 - 2800) / 7);
 });
 
-test('today’s provisional balance informs future previews but future meals do not advance carry', () => {
-  const data = threeDays();
-  data.entries.push(meal(today, 500), meal('2026-10-14', 1000));
+test('today’s difference previews later days, but planned future meals never carry', () => {
+  const data = dataWith([meal('2026-10-11', 2700), meal(today, 2000), meal('2026-10-14', 1000)]);
   const ledger = calorieLedger(data, [], today);
-  assert.equal(ledger.days[today].carryIn, 200);
-  assert.equal(ledger.days[today].balance, 2400);
+  assert.equal(ledger.days[today].carryIn, 0);
+  assert.equal(ledger.days[today].difference, 700);
   assert.equal(ledger.days[today].settled, false);
-  assert.equal(ledger.days['2026-10-14'].carryIn, 2400);
-  assert.equal(ledger.days['2026-10-14'].balance, 4100);
+  assert.equal(ledger.provisional, ledger.days[today]);
+  close(ledger.days['2026-10-14'].carryIn, 100);
   assert.equal(ledger.days['2026-10-14'].settled, false);
-  assert.equal(ledger.completed.length, 3);
-  assert.equal(carryBefore('2026-10-15', ledger), 2400);
-});
-
-test('carry lookup uses the latest completed day strictly before any selected date', () => {
-  const ledger = calorieLedger(threeDays(), [], today);
-  assert.equal(carryBefore('2026-10-01', ledger), 0);
-  assert.equal(carryBefore('2026-10-09', ledger), 0);
-  assert.equal(carryBefore('2026-10-10', ledger), 300);
-  assert.equal(carryBefore('2026-10-11', ledger), 100);
-  assert.equal(carryBefore('2026-10-12', ledger), 200);
-  assert.equal(carryBefore('2027-01-01', ledger), 200);
-  assert.equal(carryBefore(today, calorieLedger(emptyData(), [], today)), 0);
+  close(carryBefore('2026-10-15', ledger), 100, 'the planned 10-14 meal adds nothing');
+  assert.equal(carryBefore('2026-10-20', ledger), 0);
+  assert.equal(ledger.completed.length, 1);
 });
 
 test('each completed day applies its own saved deficit and burn target', () => {
@@ -112,8 +140,7 @@ test('each completed day applies its own saved deficit and burn target', () => {
   data.days['2026-10-11'] = settings(2000, 700);
   const ledger = calorieLedger(data, [], today);
   assert.deepEqual(ledger.completed.map(day => day.baseBudget), [2400, 2200, 1300]);
-  assert.deepEqual(ledger.completed.map(day => day.balance), [400, 600, -100]);
-  assert.equal(carryBefore(today, ledger), -100);
+  closeAll(ledger.completed.map(day => day.difference), [400, 2200 + 400 / 7 - 2000, 1300 + (400 + 200 + 400 / 7) / 7 - 2000]);
 });
 
 test('Garmin actual totals settle past days and explicit manual burn overrides still win', () => {
@@ -121,71 +148,69 @@ test('Garmin actual totals settle past days and explicit manual burn overrides s
   data.days['2026-10-10'] = settings(2800, 500, 'manual');
   const ledger = calorieLedger(data, [reading('2026-10-09', 400, 1800), reading('2026-10-10', 900, 1900, 4000)], today);
   assert.equal(ledger.days['2026-10-09'].baseBudget, 1700);
-  assert.equal(ledger.days['2026-10-09'].balance, -300);
-  assert.equal(ledger.days['2026-10-10'].baseBudget, 2300);
-  assert.equal(ledger.days['2026-10-10'].balance, 0, 'manual 2800, not Garmin 4000, controls this day');
+  assert.equal(ledger.days['2026-10-09'].difference, -300);
+  assert.equal(ledger.days['2026-10-10'].baseBudget, 2300, 'manual 2800, not Garmin 4000, controls this day');
 });
 
-test('today’s Garmin prediction carries provisionally, then settles the recorded final total', () => {
+test('today’s Garmin prediction previews later days, then settles the recorded final total', () => {
   const journal = dataWith([meal('2026-10-12', 2500), meal('2026-10-13', 2200)], settings(3200, 500, 'garmin'));
   const yesterday = reading('2026-10-12', 781, 2338, 3119);
   const partialToday = reading('2026-10-13', 10, 23, 33);
   const provisional = calorieLedger(journal, [yesterday, partialToday], '2026-10-13');
-  assert.equal(provisional.days['2026-10-12'].balance, 119);
+  assert.equal(provisional.days['2026-10-12'].difference, 119);
   assert.equal(provisional.days['2026-10-13'].baseBudget, 1848, '10 active plus 2338 yesterday resting minus deficit');
-  assert.equal(provisional.days['2026-10-13'].rawBudget, 1967);
+  close(provisional.days['2026-10-13'].rawBudget, 1848 + 17);
   assert.equal(provisional.days['2026-10-13'].settled, false);
-  assert.equal(carryBefore('2026-10-14', provisional), -233);
+  close(carryBefore('2026-10-14', provisional), (119 + 1865 - 2200) / 7);
 
   const finalToday = reading('2026-10-13', 962, 2488, 3450);
   const settled = calorieLedger(journal, [yesterday, finalToday], '2026-10-14');
   assert.equal(settled.days['2026-10-13'].baseBudget, 2950, 'completed day uses recorded total 3450');
-  assert.equal(settled.days['2026-10-13'].balance, 869);
-  assert.equal(carryBefore('2026-10-14', settled), 869);
+  close(settled.days['2026-10-13'].difference, 2967 - 2200);
+  close(carryBefore('2026-10-14', settled), (119 + 767) / 7);
 });
 
-test('debt survives a clamped zero budget and later unused calories repay it', () => {
-  const data = dataWith([
-    meal('2026-10-09', 2000),
-    meal('2026-10-10', 100),
-    meal('2026-10-11', 100),
-  ], settings(1000, 200));
+test('debt survives a zero-floored budget instead of being forgiven', () => {
+  const data = dataWith([meal('2026-10-09', 1500), meal('2026-10-10', 0)], settings(300, 200));
   const ledger = calorieLedger(data, [], today);
-  assert.deepEqual(ledger.completed.map(day => day.rawBudget), [800, -400, 300]);
-  assert.deepEqual(ledger.completed.map(day => day.budget), [800, 0, 300]);
-  assert.deepEqual(ledger.completed.map(day => day.balance), [-1200, -500, 200]);
-  assert.equal(carryBefore(today, ledger), 200);
+  assert.equal(ledger.days['2026-10-09'].difference, -1400);
+  const floored = ledger.days['2026-10-10'];
+  close(floored.rawBudget, -100);
+  assert.equal(floored.budget, 0);
+  close(floored.deferredDebt, 100);
+  close(floored.difference, -100, 'the unpaid part of the day is spread again');
+  close(floored.balance, -1400 * 6 / 7 - 100);
 });
 
 test('a logged zero-calorie meal remains a logged day while an empty journal contributes nothing', () => {
   const data = dataWith([meal('2026-10-09', 1000), meal('2026-10-10', 0)], settings(800, 500));
   const ledger = calorieLedger(data, [], today);
-  assert.equal(ledger.days['2026-10-09'].balance, -700);
-  assert.equal(ledger.days['2026-10-10'].rawBudget, -400);
-  assert.equal(ledger.days['2026-10-10'].budget, 0);
-  assert.equal(ledger.days['2026-10-10'].balance, -400);
+  assert.equal(ledger.days['2026-10-09'].difference, -700);
+  close(ledger.days['2026-10-10'].difference, 200);
   assert.equal(ledger.completed.length, 2);
   assert.deepEqual(calorieLedger(emptyData(), [reading('2026-10-09', 500, 2000)], today).completed, []);
 });
 
 test('editing or deleting past meals recomputes the carry instead of adding another adjustment', () => {
   const data = threeDays();
-  assert.equal(carryBefore(today, calorieLedger(data, [], today)), 200);
+  const before = carryBefore(today, calorieLedger(data, [], today));
   data.entries = data.entries.map(entry => entry.date === '2026-10-10' ? meal(entry.date, 3100, entry.id) : entry);
-  assert.equal(carryBefore(today, calorieLedger(data, [], today)), 0);
+  const edited = calorieLedger(data, [], today);
+  close(edited.days['2026-10-10'].difference, 2700 + 300 / 7 - 3100);
+  assert.ok(carryBefore(today, edited) < before);
   data.entries = data.entries.filter(entry => entry.date !== '2026-10-10');
   const deletedDay = calorieLedger(data, [], today);
-  assert.equal(carryBefore(today, deletedDay), 400);
   assert.equal(deletedDay.days['2026-10-10'], undefined);
+  close(carryBefore(today, deletedDay), (300 + (2700 + 300 / 7 - 2600)) / 7);
 });
 
-test('target edits and delayed Garmin corrections recompute the same cumulative ledger', () => {
+test('target edits and delayed Garmin corrections recompute the same ledger', () => {
   const data = threeDays();
   data.days['2026-10-09'] = settings(3200, 600);
-  assert.equal(carryBefore(today, calorieLedger(data, [], today)), 100);
+  assert.equal(calorieLedger(data, [], today).days['2026-10-09'].difference, 200);
   data.days['2026-10-09'] = settings(3200, 500, 'garmin');
   const corrected = calorieLedger(data, [reading('2026-10-09', 800, 2200)], today);
-  assert.equal(carryBefore(today, corrected), 0);
+  assert.equal(corrected.days['2026-10-09'].difference, 100);
   assert.deepEqual(corrected, calorieLedger(data, [reading('2026-10-09', 800, 2200)], today));
 });
 
@@ -223,8 +248,6 @@ test('invalid base targets and numeric coercion are rejected, including finite-i
   }
   for (const value of ['300', null, true]) assert.throws(() => adjustedBudget(3200, 500, value));
   assert.throws(() => adjustedBudget(Number.MAX_VALUE, 0, Number.MAX_VALUE));
-  assert.throws(() => adjustedBudget(Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE),
-    'finite inputs must not produce infinite deferred debt');
 });
 
 test('missing automatic days carry budgets derived from the global completed resting donor', () => {
@@ -239,12 +262,13 @@ test('missing automatic days carry budgets derived from the global completed res
   ];
   const ledger = calorieLedger(data, imports, today);
   assert.equal(ledger.days['2026-10-09'].baseBudget, 1700, 'global donor works even without an exact previous-day record');
-  assert.equal(ledger.days['2026-10-09'].balance, 700);
+  assert.equal(ledger.days['2026-10-09'].difference, 700);
   assert.equal(ledger.days['2026-10-11'].baseBudget, 1700);
-  assert.equal(ledger.days['2026-10-11'].balance, 800);
-  assert.equal(carryBefore(today, ledger), 800);
+  close(ledger.days['2026-10-11'].difference, 200);
+  close(ledger.days['2026-10-11'].balance, 200 + 700 * 5 / 7);
+  close(carryBefore(today, ledger), 900 / 7);
   assert.equal(ledger.days[today].baseBudget, 0, 'an actual partial today remains actual when exact yesterday is absent');
-  assert.equal(ledger.days[today].balance, -200);
+  close(ledger.days[today].balance, (900 / 7 - 1000) + 200 * 6 / 7 + 700 * 4 / 7);
   assert.equal(ledger.days[today].settled, false);
   for (const [date, row] of Object.entries(ledger.days)) {
     const effective = effectiveBurned(date, data.days[date] ?? data.defaults, imports, today);
@@ -260,8 +284,8 @@ test('unknown automatic burn creates neither credit nor debt before completed Ga
   const ledger = calorieLedger(data, imports, today);
   assert.deepEqual(ledger.completed, []);
   assert.equal(carryBefore(today, ledger), 0);
-  assert.equal(ledger.days['2026-10-09'].balance, -1000, 'the placeholder row is not a settled balance');
-  assert.equal(ledger.days['2026-10-11'].balance, -500, 'unknown prior intake is not carried into another row');
+  assert.equal(ledger.days['2026-10-11'].carryIn, 0, 'unknown prior intake is not carried into another row');
+  assert.equal(ledger.days['2026-10-11'].balance, -500);
   for (const row of Object.values(ledger.days)) {
     assert.equal(row.baseBudget, 0);
     assert.equal(row.available, false);
@@ -269,15 +293,15 @@ test('unknown automatic burn creates neither credit nor debt before completed Ga
   }
 });
 
-test('a zero resting fallback remains valid in the ledger and retains accumulated debt', () => {
+test('a zero resting fallback remains valid in the ledger and keeps its debt', () => {
   const data = dataWith([meal('2026-10-09', 1000)], settings(3200, 500, 'garmin'));
   const imports = [reading('2026-10-08', 700, 2000), reading('2026-10-10', 600, 0)];
   const ledger = calorieLedger(data, imports, today);
   assert.equal(ledger.days['2026-10-09'].baseBudget, 0);
   assert.equal(ledger.days['2026-10-09'].available, true);
   assert.equal(ledger.days['2026-10-09'].settled, true);
-  assert.equal(ledger.days['2026-10-09'].balance, -1000);
-  assert.equal(carryBefore(today, ledger), -1000);
+  assert.equal(ledger.days['2026-10-09'].difference, -1000);
+  close(carryBefore(today, ledger), -1000 / 7);
 });
 
 test('later Garmin imports settle formerly unknown days exactly once on recomputation', () => {
@@ -288,12 +312,10 @@ test('later Garmin imports settle formerly unknown days exactly once on recomput
   const imports = [reading('2026-10-11', 500, 1900), reading('2026-10-09', 300, 1700)];
   const loaded = calorieLedger(data, imports, today);
   assert.deepEqual(loaded.completed.map(row => row.date), ['2026-10-09', '2026-10-11']);
-  assert.deepEqual(loaded.completed.map(row => row.balance), [500, 1900]);
+  closeAll(loaded.completed.map(row => row.difference), [500, 1900 + 500 / 7 - 500]);
   assert.ok(loaded.completed.every(row => row.available && row.settled));
-  assert.equal(carryBefore(today, loaded), 1900);
-  const recalculated = calorieLedger(data, imports, today);
-  assert.deepEqual(recalculated, loaded);
-  assert.equal(carryBefore(today, recalculated), 1900, 'the waiting placeholders never become extra adjustment entries');
+  close(carryBefore(today, loaded), (500 + 1400 + 500 / 7) / 7);
+  assert.deepEqual(calorieLedger(data, imports, today), loaded, 'the waiting placeholders never become extra adjustment entries');
 });
 
 test('explicit manual zero and an imported Garmin zero are available completed burn amounts', () => {
@@ -307,170 +329,18 @@ test('explicit manual zero and an imported Garmin zero are available completed b
     assert.equal(row.settled, true);
     assert.equal(row.balance, -250);
     assert.equal(ledger.completed.length, 1);
-    assert.equal(carryBefore(today, ledger), -250);
+    close(carryBefore(today, ledger), -250 / 7);
   }
 });
 
-test('the exact 1000 kcal deficit boundary leaves no deferral, with fractional excess retained', () => {
-  assert.equal(MAX_DAILY_DEFICIT, 1000);
-  assert.deepEqual(adjustedBudget(3200, 500, -500), {
-    baseBudget: 2700, carryIn: -500, rawBudget: 2200, budget: 2200, deferredDebt: 0, deferredSurplus: 0,
-  });
-  assert.deepEqual(adjustedBudget(3200, 500, -500.25), {
-    baseBudget: 2700, carryIn: -500.25, rawBudget: 2199.75, budget: 2200, deferredDebt: 0.25, deferredSurplus: 0,
-  });
-  assert.deepEqual(adjustedBudget(3200, 500, -499.75), {
-    baseBudget: 2700, carryIn: -499.75, rawBudget: 2200.25, budget: 2200.25, deferredDebt: 0, deferredSurplus: 0,
-  });
-});
-
-test('burned calories below 1000 keep a zero allowance floor without erasing negative raw debt', () => {
-  assert.deepEqual(adjustedBudget(900, 200, -900), {
-    baseBudget: 700, carryIn: -900, rawBudget: -200, budget: 0, deferredDebt: 200, deferredSurplus: 0,
-  });
-  assert.deepEqual(adjustedBudget(0, 0, -50), {
-    baseBudget: 0, carryIn: -50, rawBudget: -50, budget: 0, deferredDebt: 50, deferredSurplus: 0,
-  });
-  assert.deepEqual(adjustedBudget(1000, 1000, 0), {
-    baseBudget: 0, carryIn: 0, rawBudget: 0, budget: 0, deferredDebt: 0, deferredSurplus: 0,
-  });
-});
-
-test('overspending is repaid over three capped days while every calorie of debt stays conserved', () => {
-  const data = dataWith([
-    meal('2026-10-05', 4200),
-    meal('2026-10-06', 2200),
-    meal('2026-10-07', 2200),
-    meal('2026-10-08', 2200),
-    meal('2026-10-09', 2700),
-  ]);
-  const ledger = calorieLedger(data, [], today);
-  assert.deepEqual(ledger.completed.map(row => row.carryIn), [0, -1500, -1000, -500, 0]);
-  assert.deepEqual(ledger.completed.map(row => row.rawBudget), [2700, 1200, 1700, 2200, 2700]);
-  assert.deepEqual(ledger.completed.map(row => row.budget), [2700, 2200, 2200, 2200, 2700]);
-  assert.deepEqual(ledger.completed.map(row => row.deferredDebt), [0, 1000, 500, 0, 0]);
-  assert.deepEqual(ledger.completed.map(row => row.balance), [-1500, -1000, -500, 0, 0]);
-
-  let earnedAllowance = 0;
-  let recordedIntake = 0;
-  for (const row of ledger.completed) {
-    earnedAllowance += 2700;
-    recordedIntake += row.eaten;
-    assert.equal(row.balance, earnedAllowance - recordedIntake,
-      'the cap changes the food allowance, never the conserved running balance');
-    assert.equal(row.balance, row.rawBudget - row.eaten,
-      'deferredDebt is not subtracted again or granted as a credit');
-  }
-  for (const row of ledger.completed.slice(1)) assert.ok(3200 - row.eaten <= MAX_DAILY_DEFICIT);
-  assert.equal(carryBefore(today, ledger), 0);
-});
-
-test('partial repayment and repeated overspending adjust the remaining debt without a reset', () => {
-  const data = dataWith([
-    meal('2026-10-06', 3700),
-    meal('2026-10-07', 2400),
-    meal('2026-10-08', 3000),
-    meal('2026-10-09', 2100),
-    meal('2026-10-10', 2300),
-  ]);
-  const rows = calorieLedger(data, [], today).completed;
-  assert.deepEqual(rows.map(row => row.rawBudget), [2700, 1700, 2000, 1700, 2300]);
-  assert.deepEqual(rows.map(row => row.budget), [2700, 2200, 2200, 2200, 2300]);
-  assert.deepEqual(rows.map(row => row.deferredDebt), [0, 500, 200, 500, 0]);
-  assert.deepEqual(rows.map(row => row.balance), [-1000, -700, -1000, -400, 0]);
-  assert.equal(rows.at(-1).balance, rows.length * 2700 - data.entries.reduce((sum, entry) => sum + entry.calories, 0));
-});
-
-test('positive credit stays spendable up to the daily surplus cap, with the rest kept for later days', () => {
-  assert.deepEqual(adjustedBudget(3200, 500, 1200), {
-    baseBudget: 2700, carryIn: 1200, rawBudget: 3900, budget: 3200, deferredDebt: 0, deferredSurplus: 700,
-  });
-  const ledger = calorieLedger(dataWith([
-    meal('2026-10-09', 2300), meal('2026-10-10', 3000), meal('2026-10-11', 2800),
-  ]), [], today);
-  assert.deepEqual(ledger.completed.map(row => row.budget), [2700, 3100, 2800]);
-  assert.deepEqual(ledger.completed.map(row => row.balance), [400, 100, 0]);
-  assert.ok(ledger.completed.every(row => row.deferredDebt === 0));
-});
-
-test('a custom base deficit above 1000 is capped without deleting its unpaid portion', () => {
-  assert.deepEqual(adjustedBudget(3200, 1500, 0), {
-    baseBudget: 1700, carryIn: 0, rawBudget: 1700, budget: 2200, deferredDebt: 500, deferredSurplus: 0,
-  });
-  const data = dataWith([
-    meal('2026-10-09', 2200), meal('2026-10-10', 2200),
-  ], settings(3200, 1500));
-  const rows = calorieLedger(data, [], today).completed;
-  assert.deepEqual(rows.map(row => row.baseBudget), [1700, 1700]);
-  assert.deepEqual(rows.map(row => row.rawBudget), [1700, 1200]);
-  assert.deepEqual(rows.map(row => row.budget), [2200, 2200]);
-  assert.deepEqual(rows.map(row => row.deferredDebt), [500, 1000]);
-  assert.deepEqual(rows.map(row => row.balance), [-500, -1000]);
-  assert.equal(data.defaults.deficit, 1500, 'the requested base target is not silently rewritten');
-});
-
-test('a base deficit already at the cap has no additional repayment room when the displayed budget is eaten', () => {
-  const ledger = calorieLedger(dataWith([
-    meal('2026-10-09', 2700), meal('2026-10-10', 2200), meal('2026-10-11', 2200),
-  ], settings(3200, 1000)), [], today);
-  assert.deepEqual(ledger.completed.map(row => row.budget), [2200, 2200, 2200]);
-  assert.deepEqual(ledger.completed.map(row => row.balance), [-500, -500, -500]);
-  assert.deepEqual(ledger.completed.map(row => row.deferredDebt), [0, 500, 500]);
-  assert.equal(carryBefore(today, ledger), -500);
-});
-
-test('past intake edits and Garmin corrections recompute which later days need capped repayment', () => {
-  const data = dataWith([
-    meal('2026-10-08', 4200), meal('2026-10-09', 2200), meal('2026-10-10', 2200),
-  ], settings(3200, 500, 'garmin'));
-  const imports = ['2026-10-08', '2026-10-09', '2026-10-10'].map(date => reading(date, 1000, 2200));
-  const original = calorieLedger(data, imports, today);
-  assert.deepEqual(original.completed.map(row => row.balance), [-1500, -1000, -500]);
-  assert.deepEqual(original.completed.map(row => row.deferredDebt), [0, 1000, 500]);
-
-  const edited = { ...data, entries: [meal('2026-10-08', 4700), ...data.entries.slice(1)] };
-  const afterEdit = calorieLedger(edited, imports, today);
-  assert.deepEqual(afterEdit.completed.map(row => row.balance), [-2000, -1500, -1000]);
-  assert.deepEqual(afterEdit.completed.map(row => row.deferredDebt), [0, 1500, 1000]);
-
-  const correctedImports = [reading('2026-10-08', 1800, 2200), ...imports.slice(1)];
-  const corrected = calorieLedger(data, correctedImports, today);
-  assert.deepEqual(corrected.completed.map(row => row.budget), [3500, 2200, 2500]);
-  assert.deepEqual(corrected.completed.map(row => row.balance), [-700, -200, 300]);
-  assert.deepEqual(corrected.completed.map(row => row.deferredDebt), [0, 200, 0]);
-  assert.equal(carryBefore(today, corrected), 300);
-  assert.deepEqual(calorieLedger(data, correctedImports, today), corrected, 'recomputation does not add a second repayment');
-});
-
-test('unlogged gaps and future plans cannot create extra repayments beyond today’s provisional balance', () => {
-  const data = dataWith([
-    meal('2026-10-06', 4200), meal('2026-10-09', 2200),
-    meal(today, 2200), meal('2026-10-14', 2200),
-  ]);
-  data.days['2026-10-07'] = settings();
-  data.days['2026-10-08'] = settings();
-  data.days['2026-10-10'] = settings();
-  data.days['2026-10-11'] = settings();
-  const imports = [reading('2026-10-08', 1000, 2200), reading('2026-10-11', 1000, 2200)];
-  const ledger = calorieLedger(data, imports, today);
-  assert.deepEqual(ledger.completed.map(row => row.date), ['2026-10-06', '2026-10-09']);
-  assert.deepEqual(ledger.completed.map(row => row.balance), [-1500, -1000]);
-  assert.equal(ledger.days['2026-10-08'], undefined);
-  assert.equal(ledger.days['2026-10-11'], undefined);
-  assert.equal(ledger.days[today].carryIn, -1000);
-  assert.equal(ledger.days[today].budget, 2200);
-  assert.equal(ledger.days[today].balance, -500);
-  assert.equal(ledger.days[today].settled, false);
-  assert.equal(ledger.days['2026-10-14'].carryIn, -500);
-  assert.equal(ledger.days['2026-10-14'].budget, 2200);
-  assert.equal(ledger.days['2026-10-14'].balance, 0);
-  assert.equal(ledger.days['2026-10-14'].settled, false);
-  assert.equal(carryBefore('2026-10-15', ledger), -500, 'today’s provisional repayment informs future previews; planned meals do not repay again');
-
-  const nextDay = calorieLedger(data, imports, '2026-10-13');
-  assert.deepEqual(nextDay.completed.map(row => row.balance), [-1500, -1000, -500]);
-  assert.equal(carryBefore('2026-10-14', nextDay), -500, 'the newly completed day settles once; an unlogged current day adds no repayment');
-  assert.equal(nextDay.days['2026-10-14'].budget, 2200);
-  assert.equal(nextDay.days['2026-10-14'].balance, 0);
-  assert.equal(nextDay.days['2026-10-14'].settled, false);
+test('the difference spread over seven days is conserved exactly', () => {
+  const dates = range('2026-10-01', 20);
+  const over = [900, -300, 0, 450, -1200, 0, 0, 300];
+  const ledger = eatAgainstBudget(dates, over, kai, '2026-10-30');
+  const rows = dates.map(date => ledger.days[date]);
+  const totalDifference = rows.reduce((sum, row) => sum + row.difference, 0);
+  const totalCarry = rows.reduce((sum, row) => sum + row.carryIn, 0);
+  close(totalCarry, totalDifference, 'every kcal over or under comes back once, no more, no less');
+  close(rows.at(-1).balance, 0);
+  close(outstandingAfter('2026-10-08', ledger, rows[7].difference), rows[7].balance);
 });

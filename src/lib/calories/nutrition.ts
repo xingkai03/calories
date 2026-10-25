@@ -21,15 +21,20 @@ export function macroTargets(budget: number) {
   };
 }
 
-/** Keep the numeric percentage uncapped; cap only the bar's visual width. */
+/**
+ * Keep the numeric percentage uncapped; cap only the bar's visual width.
+ * `overPercent` is how far past the target consumption went (capped at one extra lap),
+ * so a ring or bar can draw the overage on top of a full track.
+ */
 export function nutrientProgress(consumed: number, target: number) {
   nonNegative(consumed, 'consumed nutrient');
   nonNegative(target, 'nutrient target');
-  if (target === 0) return { percent: null, barPercent: consumed > 0 ? 100 : 0, reached: false };
+  if (target === 0) return { percent: null, barPercent: consumed > 0 ? 100 : 0, overPercent: 0, reached: false };
   const rawPercent = consumed / target * 100;
   return {
     percent: Number.isFinite(rawPercent) ? rawPercent : null,
     barPercent: Math.min(100, rawPercent),
+    overPercent: Math.min(100, Math.max(0, rawPercent - 100)),
     reached: consumed >= target,
   };
 }

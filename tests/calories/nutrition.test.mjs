@@ -30,8 +30,8 @@ test('low and zero budgets never create negative carb targets or divide by zero'
   const zero = macroTargets(0);
   assert.equal(zero.fat, 0);
   assert.equal(zero.carbs, 0);
-  assert.deepEqual(nutrientProgress(0, 0), { percent: null, barPercent: 0, reached: false });
-  assert.deepEqual(nutrientProgress(10, 0), { percent: null, barPercent: 100, reached: false });
+  assert.deepEqual(nutrientProgress(0, 0), { percent: null, barPercent: 0, overPercent: 0, reached: false });
+  assert.deepEqual(nutrientProgress(10, 0), { percent: null, barPercent: 100, overPercent: 0, reached: false });
   assert.equal(nutrientProgress(1, Number.MIN_VALUE).percent, null);
 });
 test('the exact protein-and-fat-only budget gives a zero carb target without floating-point residue', () => {
@@ -41,8 +41,8 @@ test('the exact protein-and-fat-only budget gives a zero carb target without flo
   assert.equal(nutrientProgress(1, targets.carbs).percent, null);
 });
 test('percentages can exceed 100% while the visual progress bar stops at full', () => {
-  assert.deepEqual(nutrientProgress(210, 175), { percent: 120, barPercent: 100, reached: true });
-  assert.deepEqual(nutrientProgress(87.5, 175), { percent: 50, barPercent: 50, reached: false });
+  assert.deepEqual(nutrientProgress(210, 175), { percent: 120, barPercent: 100, overPercent: 20, reached: true });
+  assert.deepEqual(nutrientProgress(87.5, 175), { percent: 50, barPercent: 50, overPercent: 0, reached: false });
 });
 test('legacy per-day and default protein targets both normalize to 175 without losing other settings', () => {
   const data = emptyData();

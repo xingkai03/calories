@@ -74,7 +74,8 @@
 .cal-energy-value { display: flex; align-items: baseline; gap: 10px; font-size: 52px; line-height: 1; letter-spacing: -2px; font-weight: 500; color: #284835; font-variant-numeric: tabular-nums; }
 .cal-energy-value > span { font-size: 15px; letter-spacing: 0; font-weight: 400; color: #5d6858; }
 .cal-energy-main p { font-size: 12px; margin-top: 9px; color: #5d6858; }
-.cal-ring { --cal-progress: 0%; width: 106px; height: 106px; border-radius: 50%; padding: 7px; background: conic-gradient(#496c46 var(--cal-progress), #dde3d1 0); flex-shrink: 0; }
+.cal-ring { --cal-progress: 0%; --cal-over: 0%; width: 106px; height: 106px; border-radius: 50%; padding: 7px; background: conic-gradient(#b4643f var(--cal-over), #496c46 var(--cal-over) var(--cal-progress), #dde3d1 0); flex-shrink: 0; }
+.cal-ring-over span { color: #9c4f2c; }
 .cal-ring > div { width: 100%; height: 100%; border-radius: 50%; background: #edf0e5; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .cal-ring span { font-size: 26px; font-weight: 500; letter-spacing: -.7px; line-height: 1.2; }
 .cal-ring span small { font-size: 14px; margin-left: 1px; font-weight: 400; }

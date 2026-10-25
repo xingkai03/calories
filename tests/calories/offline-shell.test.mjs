@@ -12,26 +12,28 @@ import { applyCaloriesUpdate, CALORIES_UPDATE_EVENT, registerCaloriesOfflineShel
 const ORIGIN = 'https://example.test';
 const fixed = ['/calories/icon.svg', '/calories/icon-192.png', '/calories/icon-512.png', '/calories/apple-touch-icon.png', '/calories/manifest.webmanifest'];
 const graph = new Map([
-  ['/_astro/app.a.js', ['/_astro/shared.a.js', '/_astro/lazy.a.js', '/_astro/imported.svg']],
-  ['/_astro/renderer.a.js', ['/_astro/shared.a.js']],
-  ['/_astro/register.a.js', []],
+  ['/calories/_astro/app.a.js', ['/calories/_astro/shared.a.js', '/calories/_astro/lazy.a.js', '/calories/_astro/imported.svg']],
+  ['/calories/_astro/renderer.a.js', ['/calories/_astro/shared.a.js']],
+  ['/calories/_astro/register.a.js', []],
 ]);
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'calories-pwa-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const files = new Map([
-    ['/calories/index.html', '<html><head><link href=\'/calories/manifest.webmanifest\' rel=\'manifest\'><link href=\'/_astro/calories.a.css\' rel=\'stylesheet\'></head><body><script src=\'/_astro/register.a.js\'></script><script>navigator.serviceWorker.register(\'/calories/sw.js\')</script><astro-island component-url=\'/_astro/app.a.js\' renderer-url=\'/_astro/renderer.a.js\'></astro-island><a href=\'/about/\'>Home</a></body></html>'],
-    ['/_astro/app.a.js', 'app version a'], ['/_astro/shared.a.js', 'shared version a'],
-    ['/_astro/lazy.a.js', 'lazy version a'], ['/_astro/renderer.a.js', 'renderer version a'],
-    ['/_astro/register.a.js', 'registration version a'], ['/_astro/imported.svg', 'imported icon'],
-    ['/_astro/calories.a.css', '@import "./theme.a.css";@font-face{src:url(../fonts/calories.woff2)}.x{background:url(data:image/png;base64,AA)}'],
-    ['/_astro/theme.a.css', 'body{color:green}'], ['/fonts/calories.woff2', 'font bytes'],
-    ['/about/index.html', 'not the app'], ['/_astro/blog.js', 'unrelated site chunk'],
+    ['/calories/index.html', '<html><head><link href=\'/calories/manifest.webmanifest\' rel=\'manifest\'><link href=\'/calories/_astro/calories.a.css\' rel=\'stylesheet\'></head><body><script src=\'/calories/_astro/register.a.js\'></script><script>navigator.serviceWorker.register(\'/calories/sw.js\')</script><astro-island component-url=\'/calories/_astro/app.a.js\' renderer-url=\'/calories/_astro/renderer.a.js\'></astro-island><a href=\'/about/\'>Home</a></body></html>'],
+    ['/calories/_astro/app.a.js', 'app version a'], ['/calories/_astro/shared.a.js', 'shared version a'],
+    ['/calories/_astro/lazy.a.js', 'lazy version a'], ['/calories/_astro/renderer.a.js', 'renderer version a'],
+    ['/calories/_astro/register.a.js', 'registration version a'], ['/calories/_astro/imported.svg', 'imported icon'],
+    ['/calories/_astro/calories.a.css', '@import "./theme.a.css";@font-face{src:url(../fonts/calories.woff2)}.x{background:url(data:image/png;base64,AA)}'],
+    ['/calories/_astro/theme.a.css', 'body{color:green}'], ['/calories/fonts/calories.woff2', 'font bytes'],
+    ['/about/index.html', 'not the app'], ['/calories/_astro/blog.js', 'unrelated site chunk'],
     ['/calories/garmin-setup/index.html', 'online setup guide'], ['/calories/setup.sql', 'not an offline resource'],
     ...fixed.map(url => [url, `static ${url}`]),
   ]);
+  // The build directory is what GitHub Pages serves at /calories/.
   for (const [url, bytes] of files) {
-    const filename = path.join(directory, url);
+    if (!url.startsWith('/calories/')) continue;
+    const filename = path.join(directory, url.slice('/calories/'.length));
     await mkdir(path.dirname(filename), { recursive: true });
     await writeFile(filename, bytes);
   }
@@ -104,8 +106,8 @@ test('build manifest includes only Calories HTML, icons, manifest and transitive
   const { directory } = await fixture(t);
   const first = await buildCaloriesWorker(directory, graph);
   const urls = first.resources.map(resource => resource.url);
-  for (const url of ['/calories/', ...fixed, ...graph.keys(), '/_astro/shared.a.js', '/_astro/lazy.a.js', '/_astro/imported.svg', '/_astro/calories.a.css', '/_astro/theme.a.css', '/fonts/calories.woff2']) assert.ok(urls.includes(url), url);
-  for (const url of ['/about/', '/about/index.html', '/_astro/blog.js', '/calories/garmin-setup/index.html', '/calories/setup.sql', '/calories/sw.js']) assert.ok(!urls.includes(url), url);
+  for (const url of ['/calories/', ...fixed, ...graph.keys(), '/calories/_astro/shared.a.js', '/calories/_astro/lazy.a.js', '/calories/_astro/imported.svg', '/calories/_astro/calories.a.css', '/calories/_astro/theme.a.css', '/calories/fonts/calories.woff2']) assert.ok(urls.includes(url), url);
+  for (const url of ['/about/', '/about/index.html', '/calories/_astro/blog.js', '/calories/garmin-setup/index.html', '/calories/setup.sql', '/calories/sw.js']) assert.ok(!urls.includes(url), url);
   assert.ok(first.resources.every(resource => /^sha256-[A-Za-z0-9+/]{43}=$/.test(resource.integrity)));
   assert.equal(new Set(urls).size, urls.length);
   assert.deepEqual(await buildCaloriesWorker(directory, graph), first, 'identical output has one stable build version');
@@ -126,7 +128,7 @@ test('Astro integration captures real Rollup imports and emits its matching work
     'app': { type: 'chunk', fileName: '_astro/app.a.js', imports: ['_astro/shared.a.js'], dynamicImports: ['_astro/lazy.a.js'], viteMetadata: { importedCss: new Set(['_astro/calories.a.css']), importedAssets: new Set(['_astro/imported.svg']) } },
   });
   await integration.hooks['astro:build:done']({ dir: pathToFileURL(`${directory}/`), logger: { info() {} } });
-  const code = await readFile(path.join(directory, 'calories/sw.js'), 'utf8');
+  const code = await readFile(path.join(directory, 'sw.js'), 'utf8');
   assert.match(code, /_astro\/shared\.a\.js/);
   assert.match(code, /_astro\/lazy\.a\.js/);
   assert.match(code, /_astro\/imported\.svg/);
@@ -142,7 +144,7 @@ test('missing required build assets fail generation instead of publishing a part
 test('successful install precaches the full version with integrity, then reopens the main page offline', async t => {
   const { directory, files } = await fixture(t);
   const manifest = await buildCaloriesWorker(directory, graph);
-  const code = await readFile(path.join(directory, 'calories/sw.js'), 'utf8');
+  const code = await readFile(path.join(directory, 'sw.js'), 'utf8');
   const serverFiles = new Map(files); serverFiles.set('/calories/', files.get('/calories/index.html'));
   const harness = cacheHarness(serverFiles), sw = worker(code, harness);
   await sw.dispatch('install'); await sw.dispatch('activate');
@@ -154,7 +156,7 @@ test('successful install precaches the full version with integrity, then reopens
   for (const url of ['/calories/', '/calories/index.html', '/calories/?open=journal']) {
     assert.equal(await (await sw.fetch(url, { mode: 'navigate' })).text(), files.get('/calories/index.html'));
   }
-  for (const url of ['/_astro/app.a.js', '/_astro/shared.a.js', '/_astro/lazy.a.js', '/_astro/calories.a.css', '/calories/icon-192.png']) {
+  for (const url of ['/calories/_astro/app.a.js', '/calories/_astro/shared.a.js', '/calories/_astro/lazy.a.js', '/calories/_astro/calories.a.css', '/calories/icon-192.png']) {
     assert.equal(await (await sw.fetch(url)).text(), files.get(url));
   }
   assert.equal(harness.fetched.length, before, 'all shell requests are satisfied offline');
@@ -165,7 +167,7 @@ test('APIs, authentication, photo uploads, other pages and non-allowlisted reque
   const { directory, files } = await fixture(t);
   await buildCaloriesWorker(directory, graph);
   const serverFiles = new Map(files); serverFiles.set('/calories/', files.get('/calories/index.html'));
-  const harness = cacheHarness(serverFiles), sw = worker(await readFile(path.join(directory, 'calories/sw.js'), 'utf8'), harness);
+  const harness = cacheHarness(serverFiles), sw = worker(await readFile(path.join(directory, 'sw.js'), 'utf8'), harness);
   await sw.dispatch('install'); harness.offline();
   const before = harness.fetched.length;
   for (const [url, options] of [
@@ -174,8 +176,8 @@ test('APIs, authentication, photo uploads, other pages and non-allowlisted reque
     ['https://private.supabase.co/functions/v1/calories-food-photos', { method: 'POST' }],
     ['https://generativelanguage.googleapis.com/v1beta/models/gemini:generateContent', { method: 'POST' }],
     ['/calories/', { headers: { authorization: 'Bearer private-token' } }],
-    ['/_astro/app.a.js', { headers: { range: 'bytes=0-100' } }],
-    ['/_astro/app.a.js?token=private', {}], ['/_astro/blog.js', {}],
+    ['/calories/_astro/app.a.js', { headers: { range: 'bytes=0-100' } }],
+    ['/calories/_astro/app.a.js?token=private', {}], ['/calories/_astro/blog.js', {}],
     ['/calories/private-photo.jpg', {}], ['/calories/setup.sql', {}],
     ['/calories/garmin-setup/', { mode: 'navigate' }], ['/about/', { mode: 'navigate' }],
     ['/calories/', { method: 'POST' }],
@@ -186,39 +188,39 @@ test('APIs, authentication, photo uploads, other pages and non-allowlisted reque
 test('failed or integrity-mismatched updates leave the previous complete cache intact', async t => {
   const { directory, files } = await fixture(t);
   const oldManifest = await buildCaloriesWorker(directory, graph);
-  const oldCode = await readFile(path.join(directory, 'calories/sw.js'), 'utf8');
+  const oldCode = await readFile(path.join(directory, 'sw.js'), 'utf8');
   const serverFiles = new Map(files); serverFiles.set('/calories/', files.get('/calories/index.html'));
   const harness = cacheHarness(serverFiles), old = worker(oldCode, harness);
   await old.dispatch('install'); await old.dispatch('activate');
   await writeFile(path.join(directory, '_astro/lazy.a.js'), 'new lazy asset');
   const updated = await buildCaloriesWorker(directory, graph);
-  const next = worker(await readFile(path.join(directory, 'calories/sw.js'), 'utf8'), harness);
+  const next = worker(await readFile(path.join(directory, 'sw.js'), 'utf8'), harness);
   await assert.rejects(next.dispatch('install'), /Integrity mismatch/, 'an out-of-sync CDN cannot install mixed bytes');
   assert.deepEqual(await harness.caches.keys(), [`calories-shell-v1-${oldManifest.version}`]);
   assert.ok(!harness.stores.has(`calories-shell-v1-${updated.version}`));
-  serverFiles.delete('/_astro/lazy.a.js');
+  serverFiles.delete('/calories/_astro/lazy.a.js');
   await assert.rejects(next.dispatch('install'), /Precache failed/, 'a missing resource also aborts the whole installation');
   assert.deepEqual(await harness.caches.keys(), [`calories-shell-v1-${oldManifest.version}`]);
   harness.offline();
-  assert.equal(await (await old.fetch('/_astro/lazy.a.js')).text(), 'lazy version a');
+  assert.equal(await (await old.fetch('/calories/_astro/lazy.a.js')).text(), 'lazy version a');
 });
 
 test('new versions keep old clients coherent until activation and clean only old Calories caches', async t => {
   const { directory, files } = await fixture(t);
   const oldManifest = await buildCaloriesWorker(directory, graph);
   const serverFiles = new Map(files); serverFiles.set('/calories/', files.get('/calories/index.html'));
-  const harness = cacheHarness(serverFiles), old = worker(await readFile(path.join(directory, 'calories/sw.js'), 'utf8'), harness);
+  const harness = cacheHarness(serverFiles), old = worker(await readFile(path.join(directory, 'sw.js'), 'utf8'), harness);
   await old.dispatch('install'); await old.dispatch('activate');
   await harness.caches.open('another-app-cache');
   const newHtml = files.get('/calories/index.html').replace('Home', 'New build');
-  await writeFile(path.join(directory, 'calories/index.html'), newHtml);
+  await writeFile(path.join(directory, 'index.html'), newHtml);
   await writeFile(path.join(directory, '_astro/app.a.js'), 'app version b');
-  serverFiles.set('/calories/', newHtml); serverFiles.set('/_astro/app.a.js', 'app version b');
+  serverFiles.set('/calories/', newHtml); serverFiles.set('/calories/_astro/app.a.js', 'app version b');
   const nextManifest = await buildCaloriesWorker(directory, graph);
-  const next = worker(await readFile(path.join(directory, 'calories/sw.js'), 'utf8'), harness);
+  const next = worker(await readFile(path.join(directory, 'sw.js'), 'utf8'), harness);
   await next.dispatch('install');
   assert.equal(await (await old.fetch('/calories/', { mode: 'navigate' })).text(), files.get('/calories/index.html'));
-  assert.equal(await (await old.fetch('/_astro/app.a.js')).text(), 'app version a');
+  assert.equal(await (await old.fetch('/calories/_astro/app.a.js')).text(), 'app version a');
   assert.deepEqual(next.takeoverCalls, { skipWaiting: 0, claim: 0 });
   assert.ok(harness.stores.has(`calories-shell-v1-${oldManifest.version}`));
   await next.dispatch('activate'); // Browser dispatches this after all old clients close.
@@ -227,7 +229,7 @@ test('new versions keep old clients coherent until activation and clean only old
   assert.ok(harness.stores.has('another-app-cache'));
   harness.offline();
   assert.equal(await (await next.fetch('/calories/', { mode: 'navigate' })).text(), newHtml);
-  assert.equal(await (await next.fetch('/_astro/app.a.js')).text(), 'app version b');
+  assert.equal(await (await next.fetch('/calories/_astro/app.a.js')).text(), 'app version b');
 });
 
 test('registration is production-only, secure and scoped, with HTTP cache bypass for update checks', async () => {
@@ -249,7 +251,7 @@ test('a waiting build activates only when the page asks for it', async t => {
   const { directory, files } = await fixture(t);
   await buildCaloriesWorker(directory, graph);
   const serverFiles = new Map(files); serverFiles.set('/calories/', files.get('/calories/index.html'));
-  const harness = cacheHarness(serverFiles), sw = worker(await readFile(path.join(directory, 'calories/sw.js'), 'utf8'), harness);
+  const harness = cacheHarness(serverFiles), sw = worker(await readFile(path.join(directory, 'sw.js'), 'utf8'), harness);
   await sw.dispatch('install');
   sw.message({ type: 'something-else' });
   sw.message(null);

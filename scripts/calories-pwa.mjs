@@ -15,14 +15,15 @@ const digest = bytes => createHash('sha256').update(bytes).digest();
 function assetPath(reference, from) {
   if (!reference || /^(?:data|blob|javascript):/i.test(reference)) return null;
   const url = new URL(reference, new URL(from, ORIGIN));
-  if (url.origin !== ORIGIN || url.search || url.pathname === '/calories/sw.js' || !ASSET_EXTENSION.test(url.pathname)) return null;
+  if (url.origin !== ORIGIN || url.search || !url.pathname.startsWith(SHELL) || url.pathname === '/calories/sw.js' || !ASSET_EXTENSION.test(url.pathname)) return null;
   return url.pathname;
 }
 
 /** Read the emitted HTML and Rollup dependency graph, never all unrelated site assets. */
 export async function buildCaloriesWorker(directory, graph = new Map()) {
   const root = directory instanceof URL ? fileURLToPath(directory) : directory;
-  const html = await readFile(path.join(root, 'calories/index.html'));
+  // The build directory is served at SHELL (Astro `base`), so `/calories/x` is `<root>/x`.
+  const html = await readFile(path.join(root, 'index.html'));
   const template = await readFile(new URL('./calories-service-worker.js', import.meta.url), 'utf8');
   const pending = [...FIXED_ASSETS];
   // Includes Astro island component/renderer URLs and inline module imports.
@@ -34,7 +35,7 @@ export async function buildCaloriesWorker(directory, graph = new Map()) {
   while (pending.length) {
     const url = pending.pop();
     if (contents.has(url)) continue;
-    const filename = path.resolve(root, `.${decodeURIComponent(url)}`);
+    const filename = path.resolve(root, decodeURIComponent(url.slice(SHELL.length)));
     if (!filename.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error('Invalid Calories asset path.');
     const bytes = await readFile(filename);
     contents.set(url, bytes);
@@ -58,7 +59,7 @@ export async function buildCaloriesWorker(directory, graph = new Map()) {
   const manifest = { version, resources };
   const worker = template.replace('/* CALORIES_PRECACHE_MANIFEST */ null', JSON.stringify(manifest));
   if (worker === template) throw new Error('Calories worker manifest marker is missing.');
-  await writeFile(path.join(root, 'calories/sw.js'), worker);
+  await writeFile(path.join(root, 'sw.js'), worker);
   return manifest;
 }
 
@@ -76,10 +77,10 @@ export default function caloriesPwa() {
           for (const item of Object.values(bundle)) {
             if (item.type !== 'chunk') continue;
             const metadata = item.viteMetadata;
-            graph.set(`/${item.fileName}`, [
+            graph.set(`${SHELL}${item.fileName}`, [
               ...item.imports, ...item.dynamicImports,
               ...(metadata?.importedCss ?? []), ...(metadata?.importedAssets ?? []),
-            ].map(filename => filename.startsWith('/') ? filename : `/${filename}`));
+            ].map(filename => filename.startsWith('/') ? filename : `${SHELL}${filename}`));
           }
         },
       }] } }),

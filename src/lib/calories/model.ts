@@ -9,7 +9,16 @@ export type BankItem = Omit<Entry, 'date' | 'meal' | 'source'>;
 export interface BankPortion { id: string; name: string; items: BankItem[] }
 export interface ManualMealInput { id: string; date: string; meal: string; name: string; carbs: number; protein: number; fat: number; fiber: number }
 export interface DaySettings { burned: number; deficit: number; protein: number; burnedSource?: 'manual' | 'garmin' }
-export interface TrackerData { version: 2; foods: Food[]; entries: Entry[]; foodBank: BankPortion[]; days: Record<string, DaySettings>; defaults: DaySettings }
+/** How the food library and pickers choose and order foods. A window of 0 means all time. */
+export type FoodSort = 'frequent' | 'recent' | 'name';
+export const FOOD_WINDOWS = [7, 14, 30, 90, 0] as const;
+export type FoodWindow = (typeof FOOD_WINDOWS)[number];
+export const FOOD_SORTS: readonly FoodSort[] = ['frequent', 'recent', 'name'];
+export interface FoodListPreferences { window: FoodWindow; sort: FoodSort }
+export const DEFAULT_FOOD_LIST: FoodListPreferences = { window: 7, sort: 'frequent' };
+export interface Preferences { foodList: FoodListPreferences }
+/** Preferences are optional so journals saved before they existed stay byte-for-byte identical. */
+export interface TrackerData { version: 2; foods: Food[]; entries: Entry[]; foodBank: BankPortion[]; days: Record<string, DaySettings>; defaults: DaySettings; preferences?: Preferences }
 
 /** This journal uses 4/4/9; fibre is tracked separately and excluded by preference.
  * Keep full precision for portion calculations; round only when displaying. */
@@ -83,6 +92,13 @@ function settings(raw: unknown): DaySettings {
   return { burned: number(v.burned, 'calories burned'), deficit: number(v.deficit, 'deficit target'), protein: DAILY_PROTEIN_GRAMS, ...(v.burnedSource !== undefined ? { burnedSource: v.burnedSource } : {}) };
 }
 
+function preferences(raw: unknown): Preferences {
+  const foodList = record(record(raw).foodList);
+  if (!FOOD_WINDOWS.includes(foodList.window as FoodWindow) || !FOOD_SORTS.includes(foodList.sort as FoodSort)) throw new Error('Invalid food list settings.');
+  return { foodList: { window: foodList.window as FoodWindow, sort: foodList.sort as FoodSort } };
+}
+export function foodListPreferences(data: TrackerData): FoodListPreferences { return data.preferences?.foodList ?? DEFAULT_FOOD_LIST; }
+
 /** Nutrition is the total for the eaten meal; no food-library record or portion scaling. */
 export function manualMealEntry(input: ManualMealInput): Entry {
   const id = text(input.id, 'entry ID');
@@ -137,5 +153,5 @@ export function normalizeData(raw: unknown): TrackerData {
   });
   const days: Record<string, DaySettings> = {};
   for (const [key, value] of Object.entries(record(v.days))) days[date(key)] = settings(value);
-  return { version: 2, foods, entries, foodBank, days, defaults: settings(v.defaults) };
+  return { version: 2, foods, entries, foodBank, days, defaults: settings(v.defaults), ...(v.preferences !== undefined ? { preferences: preferences(v.preferences) } : {}) };
 }

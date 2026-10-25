@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { consumeFoodBankPortion, prepareFoodBankPortions } from '../../src/lib/calories/food-bank.ts';
 import { dayTotals, emptyData, normalizeData } from '../../src/lib/calories/model.ts';
 import { calorieLedger } from '../../src/lib/calories/budget.ts';
-import { sortFoodsByRecentUse } from '../../src/lib/calories/food-order.ts';
+import { rankFoods } from '../../src/lib/calories/food-order.ts';
+
+const FOURTEEN_DAYS = { window: 14, sort: 'frequent' };
 
 const rice = Object.freeze({ id: 'rice', name: 'Rice', baseQuantity: 100, unit: 'g', state: 'Cooked', protein: 3, carbs: 28, fat: 1, fiber: 2, calories: 999 });
 const egg = Object.freeze({ id: 'egg', name: 'Eggs', baseQuantity: 2, unit: 'piece', state: 'Raw', protein: 12, carbs: 1, fat: 10, fiber: 0, calories: 999 });
@@ -228,7 +230,7 @@ test('unconsumed preparation contributes no daily nutrients, recent food use, or
   const initial = normalizeData({ ...emptyData(), foods: foods.map(food => ({ ...food })), defaults: { burned: 3000, deficit: 500, protein: 175, burnedSource: 'manual' } });
   const withBank = { ...initial, foodBank: prepare(3) };
   assert.deepEqual(dayTotals(withBank.entries), dayTotals(initial.entries));
-  assert.deepEqual(sortFoodsByRecentUse(withBank.foods, withBank.entries, '2026-10-15'), sortFoodsByRecentUse(initial.foods, initial.entries, '2026-10-15'));
+  assert.deepEqual(rankFoods(withBank.foods, withBank.entries, '2026-10-15', FOURTEEN_DAYS).foods, rankFoods(initial.foods, initial.entries, '2026-10-15', FOURTEEN_DAYS).foods);
   assert.deepEqual(calorieLedger(withBank, [], '2026-10-15'), { days: {}, completed: [] });
   assert.deepEqual(withBank.days, {});
   const consumed = consumeFoodBankPortion(withBank, withBank.foodBank[0].id, '2026-10-14', 'Lunch');

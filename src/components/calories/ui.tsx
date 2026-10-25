@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { EffectiveBurned, GarminStatus } from '../../lib/calories/garmin';
 
-export type IconName = 'leaf' | 'plus' | 'left' | 'right' | 'close' | 'edit' | 'trash' | 'settings' | 'download' | 'lock' | 'logout' | 'check' | 'search' | 'calendar' | 'arrow' | 'book' | 'watch' | 'refresh';
+export type IconName = 'leaf' | 'plus' | 'left' | 'right' | 'close' | 'edit' | 'trash' | 'settings' | 'download' | 'lock' | 'logout' | 'check' | 'search' | 'history' | 'calendar' | 'arrow' | 'book' | 'watch' | 'refresh';
 
 export function Icon({ name, size = 20, ...props }: { name: IconName; size?: number; className?: string }) {
   const paths: Record<IconName, ReactNode> = {
@@ -18,6 +18,7 @@ export function Icon({ name, size = 20, ...props }: { name: IconName; size?: num
     logout: <><path d="M10 4H4v16h6M9 12h12m-4-4 4 4-4 4"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     search: <><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></>,
+    history: <><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6"/><path d="M4 4v4.6h4.6M12 8v4l3 2"/></>,
     calendar: <><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4M16 3v4M4 10h16M8 14h2M14 14h2"/></>,
     arrow: <path d="M4 12h16m-6-6 6 6-6 6"/>,
     book: <><path d="M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4V4ZM20 4h-4a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h3V4Z"/></>,

@@ -50,7 +50,6 @@ export default function TrendsView({ data, garminDays, currentDay, onApplyDefici
   const weekly = summary.kgPerWeek;
 
   return <>
-    <section className="cal-page-heading"><div><div className="cal-eyebrow">WHERE THIS IS HEADING</div><h1>Trends<span className="cal-heading-dot">.</span></h1><p>Completed days only. Today is added once it ends.</p></div></section>
     <div className="cal-trends-range" role="group" aria-label="Time range">{SPANS.map(option => <button key={option} type="button" aria-pressed={span === option} onClick={() => setSpan(option)}>{option} days</button>)}</div>
 
     {summary.loggedDays === 0 ? <div className="cal-empty-journal"><h3>Nothing to chart yet.</h3><p>Log food on a few days and your averages and projections will appear here.</p></div> : <>

@@ -108,3 +108,12 @@ test('calendar navigation crosses month, leap year, and daylight saving boundari
   assert.equal(addDays('2024-03-01', -1), '2024-02-29');
   assert.equal(addDays('2026-12-31', 1), '2027-01-01');
 });
+
+test('food list settings round-trip, stay absent on older journals and reject unknown values', () => {
+  assert.equal('preferences' in normalizeData(backup()), false);
+  const preferences = { foodList: { window: 30, sort: 'recent' } };
+  assert.deepEqual(normalizeData({ ...backup(), preferences }).preferences, preferences);
+  for (const foodList of [{ window: 5, sort: 'recent' }, { window: 7, sort: 'calories' }, { window: '7', sort: 'name' }]) {
+    assert.throws(() => normalizeData({ ...backup(), preferences: { foodList } }), /food list settings/);
+  }
+});

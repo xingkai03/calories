@@ -169,8 +169,6 @@
 .cal-history-row > span > small { font-size: 10px; color: #98a087; }
 .cal-history-row > span:first-child > small { display: block; margin-top: 4px; }
 .cal-history-row > svg { color: #a5af96; }
-.cal-footer { display: flex; justify-content: space-between; gap: 20px; padding: 32px 0 29px; margin-top: 30px; font-size: 9px; color: #a8ae9b; border-top: 1px solid #e8eadf; }
-.cal-footer a:hover { color: var(--cal-green); }
 .cal-save-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; max-width: 1060px; margin: 14px auto 0; border: 1px solid #e9d4b6; background: #fcf2e2; padding: 16px 20px; border-radius: 12px; font-size: 12px; color: #856448; }
 .cal-save-alert > div { flex: 1; min-width: 220px; }
 .cal-save-alert strong { font-weight: 600; }
@@ -349,7 +347,6 @@
   .cal-history-header { font-size: 9px; padding-top: 14px; padding-bottom: 14px; }
   .cal-history-row > span > strong { font-size: 12px; }
   .cal-history-row > span > small { font-size: 9px; }
-  .cal-footer { font-size: 8px; padding-top: 23px; margin-top: 25px; }
   .cal-save-alert { margin: 20px 24px 0; padding: 14px; gap: 13px; font-size: 11px; }
   .cal-save-alert p { font-size: 10px; }
   .cal-auth-shell { padding: 23px 24px 30px; }
@@ -398,7 +395,6 @@
   .cal-history-header, .cal-history-row { padding-left: 14px; padding-right: 14px; gap: 8px; }
   .cal-history-row > span > strong { font-size: 11px; }
   .cal-history-row > span > small { font-size: 8px; }
-  .cal-footer { flex-direction: column; align-items: center; gap: 6px; padding-top: 21px; }
   .cal-save-alert { margin-left: 19px; margin-right: 19px; }
   .cal-auth-shell { padding: 23px 19px 29px; }
   .cal-auth-card { padding: 29px 26px 26px; }
@@ -437,9 +433,9 @@
   .cal-form input:not([type='checkbox']), .cal-form select, .cal-form textarea { font-size: 16px; }
   .cal-form-grid-three select { font-size: 14px; }
 }
-.cal-eyebrow, .cal-sync, .cal-page-heading p, .cal-energy-main p, .cal-energy-bottom > span, .cal-energy-bottom small, .cal-target-note, .cal-ring > div > small, .cal-pill, .cal-protein > div:first-child > span, .cal-protein strong small, .cal-protein p, .cal-macro-grid > div > span, .cal-macro-grid small, .cal-section-heading p, .cal-empty-journal p, .cal-meal-number, .cal-meal-heading > span:last-child, .cal-entry-info > span, .cal-entry-macros, .cal-entry-macros b, .cal-entry-energy small, .cal-library-bar > span, .cal-food-state, .cal-food-card > p, .cal-food-energy span, .cal-food-macros > span, .cal-food-footer p, .cal-history-header, .cal-history-row > span > small, .cal-footer, .cal-home-link, .cal-auth-intro, .cal-checkbox small, .cal-auth-footnote, .cal-auth-tagline, .cal-field-hint, .cal-loading p, .cal-setup-note, .cal-modal-intro, .cal-unit-input > span, .cal-form-section-label p, .cal-entry-preview > div:first-child > span, .cal-entry-preview > div:first-child > strong small, .cal-preview-macros > span, .cal-entry-preview p, .cal-budget-preview > span, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p { color: #5d6858; }
+.cal-eyebrow, .cal-sync, .cal-page-heading p, .cal-energy-main p, .cal-energy-bottom > span, .cal-energy-bottom small, .cal-target-note, .cal-ring > div > small, .cal-pill, .cal-protein > div:first-child > span, .cal-protein strong small, .cal-protein p, .cal-macro-grid > div > span, .cal-macro-grid small, .cal-section-heading p, .cal-empty-journal p, .cal-meal-number, .cal-meal-heading > span:last-child, .cal-entry-info > span, .cal-entry-macros, .cal-entry-macros b, .cal-entry-energy small, .cal-library-bar > span, .cal-food-state, .cal-food-card > p, .cal-food-energy span, .cal-food-macros > span, .cal-food-footer p, .cal-history-header, .cal-history-row > span > small, .cal-home-link, .cal-auth-intro, .cal-checkbox small, .cal-auth-footnote, .cal-auth-tagline, .cal-field-hint, .cal-loading p, .cal-setup-note, .cal-modal-intro, .cal-unit-input > span, .cal-form-section-label p, .cal-entry-preview > div:first-child > span, .cal-entry-preview > div:first-child > strong small, .cal-preview-macros > span, .cal-entry-preview p, .cal-budget-preview > span, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p { color: #5d6858; }
 .cal-eyebrow, .cal-sync, .cal-energy-bottom > span, .cal-energy-bottom small, .cal-ring > div > small, .cal-pill, .cal-protein strong small, .cal-macro-grid > div > span, .cal-macro-grid small, .cal-meal-number, .cal-meal-heading > span:last-child, .cal-entry-macros, .cal-entry-macros b, .cal-entry-macros small, .cal-entry-energy small, .cal-food-state, .cal-food-energy span, .cal-food-macros > span, .cal-food-footer .cal-text-button, .cal-history-header, .cal-unit-input > span, .cal-preview-macros > span, .cal-entry-preview > div:first-child > strong small { font-size: 11px; }
-.cal-page-heading p, .cal-energy-main p, .cal-target-note, .cal-protein p, .cal-section-heading p, .cal-empty-journal p, .cal-entry-info > span, .cal-library-bar > span, .cal-food-card > p, .cal-food-macros strong, .cal-food-footer p, .cal-history-row > span > small, .cal-footer, .cal-auth-intro, .cal-checkbox small, .cal-auth-footnote, .cal-auth-tagline, .cal-field-hint, .cal-setup-note, .cal-form-section-label p, .cal-entry-preview p, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p, .cal-import-confirm p { font-size: 12px; }
+.cal-page-heading p, .cal-energy-main p, .cal-target-note, .cal-protein p, .cal-section-heading p, .cal-empty-journal p, .cal-entry-info > span, .cal-library-bar > span, .cal-food-card > p, .cal-food-macros strong, .cal-food-footer p, .cal-history-row > span > small, .cal-auth-intro, .cal-checkbox small, .cal-auth-footnote, .cal-auth-tagline, .cal-field-hint, .cal-setup-note, .cal-form-section-label p, .cal-entry-preview p, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p, .cal-import-confirm p { font-size: 12px; }
 .cal-auth-footnote { align-items: flex-start; line-height: 1.6; }
 .cal-auth-footnote svg { margin-top: 2px; }
 .cal-auth-config, .cal-add-food-inline, .cal-setup-guide strong, .cal-setup-guide a, .cal-form-error, .cal-save-alert p { font-size: 12px; }
@@ -596,7 +592,6 @@
 .cal-dialog { overscroll-behavior: contain; }
 @media (max-width: 760px) {
   .calorie-app input:not([type='checkbox']):not([type='radio']):not([type='range']), .calorie-app select, .calorie-app textarea { font-size: 16px; }
-  .cal-footer { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
   .cal-nav button { flex: 1 0 auto; }
 }
 @media (max-width: 430px) { .cal-nav button { font-size: 11.5px; padding-inline: 7px; } }
@@ -631,3 +626,20 @@
   .cal-main { padding-bottom: 72px; }
 }
 .cal-update-banner { position: sticky; top: 0; z-index: 70; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 14px; padding: 8px 16px; padding-top: max(8px, env(safe-area-inset-top)); background: #e4ecd7; border-bottom: 1px solid #cfdbbe; color: #2f4a26; font-size: 13px; font-weight: 550; }
+
+/* Quieter pages: no decorative headings, food list settings beside the search, one Summary tab. */
+.cal-main { padding-bottom: 48px; }
+.cal-section-actions { justify-content: flex-end; }
+.cal-library-bar { margin-bottom: 10px; }
+.cal-library-options { display: flex; gap: 10px; margin-right: auto; }
+.cal-library-options label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 550; color: #5d6858; }
+.cal-library-options select { min-height: 40px; padding: 8px 10px; border: 1px solid var(--cal-border); border-radius: 10px; background: var(--cal-panel); color: var(--cal-ink); font-size: 12px; }
+.cal-library-count { font-size: 12px; color: #5d6858; margin-bottom: 20px !important; }
+.cal-summary-days { margin-top: 32px; }
+@media (max-width: 760px) {
+  .cal-library-options { width: 100%; }
+  .cal-library-options label { flex: 1; min-width: 0; }
+  .cal-library-options select { flex: 1; min-width: 0; width: 100%; }
+  .cal-library-bar > .cal-button { width: 100%; }
+  .cal-main { padding-bottom: 88px; }
+}

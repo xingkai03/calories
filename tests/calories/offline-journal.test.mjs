@@ -299,3 +299,12 @@ test('an interrupted successful save body remains pending and resolves the commi
   assert.equal(result.pending, false); assert.equal(result.conflict, null);
   assert.equal(h.state.writes, 1);
 });
+
+test('food list settings merge like other records and conflict only when both devices change them differently', () => {
+  const base = emptyData();
+  const byName = { ...base, preferences: { foodList: { window: 7, sort: 'name' } } };
+  const recent = { ...base, preferences: { foodList: { window: 30, sort: 'recent' } } };
+  assert.deepEqual(mergeJournals(base, byName, base).preferences, byName.preferences);
+  assert.deepEqual(mergeJournals(base, base, recent).preferences, recent.preferences);
+  assert.throws(() => mergeJournals(base, byName, recent), JournalConflictError);
+});

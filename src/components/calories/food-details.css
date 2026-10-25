@@ -1,0 +1,24 @@
+.cal-food-details-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+.cal-food-details-stats > span { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--cal-border); border-radius: 12px; background: #f6f7ef; font-size: 12px; color: #5d6858; }
+.cal-food-details-stats strong { font-size: 20px; font-weight: 550; letter-spacing: -.4px; color: var(--cal-ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cal-food-details-stats small { font-size: 12px; color: #5d6858; }
+.cal-food-details-list { list-style: none; padding: 0; margin: 0 0 8px; border: 1px solid var(--cal-border); border-radius: 12px; overflow: hidden; }
+.cal-food-details-list li + li { border-top: 1px solid #ededdf; }
+.cal-food-details-list button { display: grid; grid-template-columns: 1fr auto auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 52px; padding: 10px 14px; border: 0; background: transparent; text-align: left; font-size: 13px; color: var(--cal-ink); font-variant-numeric: tabular-nums; }
+.cal-food-details-list button:hover { background: #f5f7ef; }
+.cal-food-details-list button > span:first-child { display: flex; flex-direction: column; }
+.cal-food-details-list strong { font-weight: 550; }
+.cal-food-details-list small { font-size: 12px; color: #5d6858; }
+.cal-food-details-list svg { color: #a5af96; }
+.cal-food-details-empty { font-size: 12px; color: #5d6858; line-height: 1.75; margin-bottom: 16px; }
+.cal-food-name-button { border: 0; padding: 0; background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.cal-food-name-button:hover { color: var(--cal-green); text-decoration: underline; text-underline-offset: 4px; }
+@media (max-width: 600px) {
+  .cal-food-details-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cal-food-details-stats strong { font-size: 17px; }
+  .cal-food-details-list button { gap: 10px; padding-inline: 12px; }
+}
+.cal-food-footer-tools { display: flex; gap: 2px; }
+.cal-food-footer .cal-food-footer-tools .cal-icon-button { margin-right: 0; }
+.cal-food-footer-tools .cal-icon-button:last-child { margin-right: -5px; }
+.cal-food-footer > .cal-text-button { white-space: nowrap; }

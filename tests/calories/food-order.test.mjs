@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mealForTime, recentFoodIds, sortFoodsByRecentUse } from '../../src/lib/calories/food-order.ts';
+import { foodUsage, mealForTime, rankFoods } from '../../src/lib/calories/food-order.ts';
+
+const FOURTEEN_DAYS = { window: 14, sort: 'frequent' };
 
 const food = (id, name, overrides = {}) => ({
   id, name, baseQuantity: 100, unit: 'g', state: 'Cooked',
@@ -24,7 +26,7 @@ test('the 14-date window includes today and 13 days ago, excluding older and fut
     ...[1, 2, 3].map(id => entry(`old-${id}`, 'older', '2026-09-30')),
     ...[1, 2, 3].map(id => entry(`future-${id}`, 'future', '2026-10-15')),
   ];
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, '2026-10-14')), ['edges', 'middle', 'older', 'future']);
+  assert.deepEqual(ids(rankFoods(foods, entries, '2026-10-14', FOURTEEN_DAYS).foods), ['edges', 'middle', 'older', 'future']);
 });
 
 test('frequency counts individual entries, including repeated foods in one meal, rather than portion size or energy', () => {
@@ -34,7 +36,7 @@ test('frequency counts individual entries, including repeated foods in one meal,
     entry('first-bite', 'repeated', '2026-10-14', { quantity: 0.1, calories: 0.081 }),
     entry('second-bite', 'repeated', '2026-10-14', { quantity: 1, calories: 0.81 }),
   ];
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, '2026-10-14')), ['repeated', 'large']);
+  assert.deepEqual(ids(rankFoods(foods, entries, '2026-10-14', FOURTEEN_DAYS).foods), ['repeated', 'large']);
 });
 
 test('food IDs survive renamed foods and old snapshots; deleted food logs never become library choices', () => {
@@ -46,7 +48,7 @@ test('food IDs survive renamed foods and old snapshots; deleted food logs never 
     entry('old-snapshot-2', renamed.id, '2026-10-14', { foodName: 'Old food name', protein: 2, calories: 65 }),
     ...[1, 2, 3].map(id => entry(`deleted-${id}`, 'deleted-id', '2026-10-14', { foodName: renamed.name })),
   ];
-  assert.deepEqual(sortFoodsByRecentUse(foods, entries, '2026-10-14'), [renamed, sameOldName]);
+  assert.deepEqual(rankFoods(foods, entries, '2026-10-14', FOURTEEN_DAYS).foods, [renamed, sameOldName]);
 });
 
 test('manual source flags and canonical legacy manual IDs are excluded without excluding unrelated ID prefixes', () => {
@@ -65,7 +67,7 @@ test('manual source flags and canonical legacy manual IDs are excluded without e
     entry('legacy-entry', 'manual:legacy-entry', '2026-10-14'),
     ...[1, 2, 3, 4].map(id => entry(`manual-${id}`, 'flagged', '2026-10-14', { source: 'manual' })),
   ];
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, '2026-10-14')), [
+  assert.deepEqual(ids(rankFoods(foods, entries, '2026-10-14', FOURTEEN_DAYS).foods), [
     'manual:unrelated', 'regular', 'unused', 'manual:legacy-entry', 'flagged',
   ]);
 });
@@ -73,13 +75,13 @@ test('manual source flags and canonical legacy manual IDs are excluded without e
 test('equal frequencies sort alphabetically, then by ID for duplicate names, independently of input order', () => {
   const foods = [food('rice-z', 'Rice'), food('pear', 'Pear'), food('rice-a', 'Rice'), food('apple', 'Apple')];
   const expected = ['apple', 'pear', 'rice-a', 'rice-z'];
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, [], '2026-10-14')), expected, 'unused foods also receive stable alphabetical ordering');
+  assert.deepEqual(ids(rankFoods(foods, [], '2026-10-14', FOURTEEN_DAYS).foods), expected, 'unused foods also receive stable alphabetical ordering');
   const entries = foods.flatMap(item => [
     entry(`${item.id}-1`, item.id, '2026-10-12'),
     entry(`${item.id}-2`, item.id, '2026-10-14'),
   ]);
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, '2026-10-14')), expected);
-  assert.deepEqual(ids(sortFoodsByRecentUse([...foods].reverse(), [...entries].reverse(), '2026-10-14')), expected);
+  assert.deepEqual(ids(rankFoods(foods, entries, '2026-10-14', FOURTEEN_DAYS).foods), expected);
+  assert.deepEqual(ids(rankFoods([...foods].reverse(), [...entries].reverse(), '2026-10-14', FOURTEEN_DAYS).foods), expected);
 });
 
 test('sorting leaves the supplied arrays, library records and recorded nutrient snapshots unchanged', () => {
@@ -91,10 +93,10 @@ test('sorting leaves the supplied arrays, library records and recorded nutrient 
   Object.freeze(foods);
   Object.freeze(entries);
 
-  assert.deepEqual(sortFoodsByRecentUse(foods, entries, '2026-10-14'), [foods[1], foods[0]]);
+  assert.deepEqual(rankFoods(foods, entries, '2026-10-14', FOURTEEN_DAYS).foods, [foods[1], foods[0]]);
   assert.deepEqual(foods, beforeFoods);
   assert.deepEqual(entries, beforeEntries);
-  assert.deepEqual(sortFoodsByRecentUse([], entries, '2026-10-14'), []);
+  assert.deepEqual(rankFoods([], entries, '2026-10-14', FOURTEEN_DAYS).foods, []);
 });
 
 test('a new calendar-day anchor expires the old boundary and admits the newly current day across a year boundary', () => {
@@ -104,8 +106,8 @@ test('a new calendar-day anchor expires the old boundary and admits the newly cu
     entry('recent', 'recent', '2026-01-03'),
     ...[1, 2].map(id => entry(`next-${id}`, 'new-day', '2026-01-04')),
   ];
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, '2026-01-03')), ['old-boundary', 'recent', 'new-day']);
-  assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, '2026-01-04')), ['new-day', 'recent', 'old-boundary']);
+  assert.deepEqual(ids(rankFoods(foods, entries, '2026-01-03', FOURTEEN_DAYS).foods), ['old-boundary', 'recent', 'new-day']);
+  assert.deepEqual(ids(rankFoods(foods, entries, '2026-01-04', FOURTEEN_DAYS).foods), ['new-day', 'recent', 'old-boundary']);
 });
 
 test('calendar-window boundaries remain inclusive across leap day and the Stockholm daylight-saving change', () => {
@@ -119,11 +121,12 @@ test('calendar-window boundaries remain inclusive across leap day and the Stockh
       entry('excluded-1', 'outside', outsideDay),
       entry('excluded-2', 'outside', outsideDay),
     ];
-    assert.deepEqual(ids(sortFoodsByRecentUse(foods, entries, currentDay)), ['inside', 'outside'], currentDay);
+    assert.deepEqual(ids(rankFoods(foods, entries, currentDay, FOURTEEN_DAYS).foods), ['inside', 'outside'], currentDay);
   }
 });
 
-test('recent foods cover today and the six days before, ignoring manual, older and future logs', () => {
+test('a 7-day window covers today and the six days before, ignoring manual, older and future logs', () => {
+  const foods = ['week-edge', 'today', 'too-old', 'future', 'flagged'].map(id => food(id, id));
   const entries = [
     entry('edge', 'week-edge', '2026-10-08'),
     entry('today', 'today', '2026-10-14'),
@@ -132,7 +135,45 @@ test('recent foods cover today and the six days before, ignoring manual, older a
     entry('manual', 'manual:manual', '2026-10-14'),
     entry('manual-source', 'flagged', '2026-10-14', { source: 'manual' }),
   ];
-  assert.deepEqual([...recentFoodIds(entries, '2026-10-14')].sort(), ['today', 'week-edge']);
+  assert.deepEqual([...rankFoods(foods, entries, '2026-10-14', { window: 7, sort: 'frequent' }).usedIds].sort(), ['today', 'week-edge']);
+  assert.equal(rankFoods(foods, entries, '2026-10-14', { window: 0, sort: 'frequent' }).usedIds, null, 'all time hides nothing');
+});
+
+test('foods can be ranked by frequency, most recent use or name', () => {
+  const foods = [food('often', 'Oats'), food('latest', 'Lentils'), food('never', 'Apple'), food('old', 'Zucchini')];
+  const entries = [
+    ...[1, 2, 3].map(id => entry(`often-${id}`, 'often', '2026-10-10')),
+    entry('latest', 'latest', '2026-10-14'),
+    ...[1, 2, 3, 4].map(id => entry(`old-${id}`, 'old', '2026-08-01')),
+  ];
+  const rank = (window, sort) => ids(rankFoods(foods, entries, '2026-10-14', { window, sort }).foods);
+  assert.deepEqual(rank(7, 'frequent'), ['often', 'latest', 'old', 'never'], 'ties fall back to the most recent use');
+  assert.deepEqual(rank(0, 'frequent'), ['old', 'often', 'latest', 'never']);
+  assert.deepEqual(rank(7, 'recent'), ['latest', 'often', 'old', 'never']);
+  assert.deepEqual(rank(7, 'name'), ['never', 'latest', 'often', 'old']);
+});
+
+test('food usage lists every library log newest first and totals what was eaten', () => {
+  const entries = [
+    entry('a', 'rice', '2026-10-01', { quantity: 150, calories: 200 }),
+    entry('b', 'rice', '2026-10-12', { quantity: 100, calories: 130, meal: 'Dinner' }),
+    entry('c', 'rice', '2026-10-12', { quantity: 50, calories: 65, meal: 'Breakfast' }),
+    entry('d', 'rice', '2026-10-13', { quantity: 1, unit: 'piece', calories: 90 }),
+    entry('planned', 'rice', '2026-10-20', { quantity: 80, calories: 100 }),
+    entry('manual', 'rice', '2026-10-13', { source: 'manual' }),
+    entry('other', 'oats', '2026-10-13'),
+  ];
+  const usage = foodUsage(entries, 'rice', '2026-10-14');
+  assert.deepEqual(usage.entries.map(item => item.id), ['planned', 'd', 'c', 'b', 'a']);
+  assert.equal(usage.count, 4);
+  assert.equal(usage.days, 3);
+  assert.equal(usage.firstDate, '2026-10-01');
+  assert.equal(usage.lastDate, '2026-10-13');
+  assert.deepEqual(usage.amounts, [{ unit: 'piece', quantity: 1, count: 1 }, { unit: 'g', quantity: 300, count: 3 }], 'units in order of most recent use');
+  assert.equal(usage.calories, 485);
+  assert.equal(usage.last7, 3);
+  assert.equal(usage.last30, 4);
+  assert.deepEqual(foodUsage(entries, 'missing', '2026-10-14'), { entries: [], count: 0, days: 0, firstDate: null, lastDate: null, amounts: [], calories: 0, last7: 0, last30: 0 });
 });
 
 test('the default meal follows the local time of day', () => {

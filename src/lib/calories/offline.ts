@@ -117,8 +117,9 @@ export function mergeJournals(baseRaw: TrackerData, localRaw: TrackerData, remot
     if (day !== undefined) days[date] = day;
   }
   const defaults = choose(base.defaults, local.defaults, remote.defaults, 'the default targets', uncertain.map(data => data.defaults));
+  const preferences = choose(base.preferences, local.preferences, remote.preferences, 'the food list settings', uncertain.map(data => data.preferences));
   try {
-    return normalizeData({ version: 2, foods: keyed(base.foods, local.foods, remote.foods, 'the same library food', uncertain.map(data => data.foods)), ...inventory(base, local, remote, uncertain), days, defaults });
+    return normalizeData({ version: 2, foods: keyed(base.foods, local.foods, remote.foods, 'the same library food', uncertain.map(data => data.foods)), ...inventory(base, local, remote, uncertain), days, defaults, ...(preferences ? { preferences } : {}) });
   } catch (error) {
     if (error instanceof JournalConflictError) throw error;
     throw new JournalConflictError('overlapping journal or food-bank records');

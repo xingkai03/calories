@@ -8,7 +8,8 @@ export interface Entry extends Macros { id: string; date: string; meal: string; 
 export type BankItem = Omit<Entry, 'date' | 'meal' | 'source'>;
 export interface BankPortion { id: string; name: string; items: BankItem[] }
 export interface ManualMealInput { id: string; date: string; meal: string; name: string; carbs: number; protein: number; fat: number; fiber: number }
-export interface DaySettings { burned: number; deficit: number; protein: number; burnedSource?: 'manual' | 'garmin' }
+/** activeEstimate is the user's guess at today's full-day active calories; it only counts while that day is in progress. */
+export interface DaySettings { burned: number; deficit: number; protein: number; burnedSource?: 'manual' | 'garmin'; activeEstimate?: number }
 /** How the food library and pickers choose and order foods. A window of 0 means all time. */
 export type FoodSort = 'frequent' | 'recent' | 'name';
 export const FOOD_WINDOWS = [7, 14, 30, 90, 0] as const;
@@ -89,7 +90,7 @@ function settings(raw: unknown): DaySettings {
   const v = record(raw);
   if (v.burnedSource !== undefined && v.burnedSource !== 'manual' && v.burnedSource !== 'garmin') throw new Error('Invalid calories burned source.');
   number(v.protein, 'protein target'); // Validate legacy backups before applying the fixed target.
-  return { burned: number(v.burned, 'calories burned'), deficit: number(v.deficit, 'deficit target'), protein: DAILY_PROTEIN_GRAMS, ...(v.burnedSource !== undefined ? { burnedSource: v.burnedSource } : {}) };
+  return { burned: number(v.burned, 'calories burned'), deficit: number(v.deficit, 'deficit target'), protein: DAILY_PROTEIN_GRAMS, ...(v.burnedSource !== undefined ? { burnedSource: v.burnedSource } : {}), ...(v.activeEstimate !== undefined ? { activeEstimate: number(v.activeEstimate, 'active calories estimate') } : {}) };
 }
 
 function preferences(raw: unknown): Preferences {

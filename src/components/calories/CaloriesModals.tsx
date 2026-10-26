@@ -186,14 +186,17 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
 }
 
 export function TargetsEditor({ date, currentDay, settings, defaultSettings, garminDays, carryIn, carryIsProvisional, onSave, onClose }: { date: string; currentDay: string; settings: DaySettings; defaultSettings?: DaySettings; garminDays: readonly GarminDay[]; carryIn: number; carryIsProvisional: boolean; onSave: (settings: DaySettings, makeDefault: boolean, originalRecordJson: string, originalDefaultsJson: string) => void | Promise<void>; onClose: () => void }) {
-  const form = usePersistentFormDraft(`targets:${date}`, { originalRecordJson: JSON.stringify(settings), originalDefaultsJson: JSON.stringify(defaultSettings ?? null), burned: settings.burned === 0 && settings.burnedSource !== 'manual' ? '' : String(settings.burned), source: (settings.burnedSource ?? 'garmin') as 'manual' | 'garmin', deficit: String(settings.deficit), makeDefault: false }, { kind: 'targets', label: `Targets for ${readableDate(date, { day: 'numeric', month: 'short', year: 'numeric' })}`, date });
+  const form = usePersistentFormDraft(`targets:${date}`, { originalRecordJson: JSON.stringify(settings), originalDefaultsJson: JSON.stringify(defaultSettings ?? null), burned: settings.burned === 0 && settings.burnedSource !== 'manual' ? '' : String(settings.burned), source: (settings.burnedSource ?? 'garmin') as 'manual' | 'garmin', deficit: String(settings.deficit), activeEstimate: settings.activeEstimate === undefined ? '' : String(settings.activeEstimate), makeDefault: false }, { kind: 'targets', label: `Targets for ${readableDate(date, { day: 'numeric', month: 'short', year: 'numeric' })}`, date });
   const [burned, setBurned] = form.field('burned');
   const [source, setSource] = form.field('source');
   const [deficit, setDeficit] = form.field('deficit');
+  const [activeEstimate, setActiveEstimate] = form.field('activeEstimate');
+  const canEstimateActive = source === 'garmin' && date === currentDay;
+  const estimate = canEstimateActive && activeEstimate.trim() !== '' ? { activeEstimate: previewNumber(activeEstimate) } : {};
   const [makeDefault, setMakeDefault] = form.field('makeDefault');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const resolved = effectiveBurned(date, { ...settings, burned: previewNumber(burned), burnedSource: source }, garminDays, currentDay);
+  const resolved = effectiveBurned(date, { deficit: settings.deficit, protein: settings.protein, burned: previewNumber(burned), burnedSource: source, ...estimate }, garminDays, currentDay);
   const effective = resolved.burned;
   const previewDeficit = previewNumber(deficit);
   const previewAllowance = adjustedBudget(effective, previewDeficit, carryIn);
@@ -203,10 +206,10 @@ export function TargetsEditor({ date, currentDay, settings, defaultSettings, gar
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (submitting) return;
-    if ([deficit, ...(source === 'manual' ? [burned] : [])].some(value => value === '' || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 1e8)) { setError('Enter finite, non-negative values no greater than 100,000,000.'); return; }
+    if ([deficit, ...(source === 'manual' ? [burned] : []), ...('activeEstimate' in estimate ? [activeEstimate] : [])].some(value => value === '' || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 1e8)) { setError('Enter finite, non-negative values no greater than 100,000,000.'); return; }
     if (source === 'manual' && Number(deficit) > Number(burned)) { setError('For a manual estimate, the deficit target cannot be greater than calories burned.'); return; }
     setSubmitting(true);
-    try { await onSave({ burned: previewNumber(burned), deficit: Number(deficit), protein: DAILY_PROTEIN_GRAMS, burnedSource: source }, makeDefault, form.draft.originalRecordJson, form.draft.originalDefaultsJson); form.clearDraft(); }
+    try { await onSave({ burned: previewNumber(burned), deficit: Number(deficit), protein: DAILY_PROTEIN_GRAMS, burnedSource: source, ...estimate }, makeDefault, form.draft.originalRecordJson, form.draft.originalDefaultsJson); form.clearDraft(); }
     catch (error) { setError(errorMessage(error)); }
     finally { setSubmitting(false); }
   }
@@ -221,6 +224,10 @@ export function TargetsEditor({ date, currentDay, settings, defaultSettings, gar
       {source === 'garmin' ? <>
         <label>{resolved.unavailable ? 'Garmin calories burned unavailable' : resolved.restingEstimate ? 'Garmin resting estimate' : resolved.predicted ? 'Predicted calories burned' : resolved.predictionUnavailable ? 'Garmin calories burned so far' : 'Calories burned from Garmin'}<span className="cal-unit-input"><input type="text" value={resolved.unavailable ? '—' : number(resolved.burned, 1)} readOnly aria-describedby="cal-garmin-target-detail"/><span>kcal</span></span></label>
         <p className="cal-field-hint" id="cal-garmin-target-detail">{burnedFormula(resolved)}.{burnedSyncTime(resolved) ? ` ${burnedSyncTime(resolved)}.` : ''}{!resolved.unavailable && date === currentDay ? ' Today’s value is provisional and updates with imported readings.' : ''}</p>
+        {canEstimateActive && <>
+          <NumericField label="Your estimate of today’s active calories" value={activeEstimate} onChange={setActiveEstimate} unit="kcal" required={false} placeholder="Use Garmin" describedBy="cal-active-estimate-hint"/>
+          <p className="cal-field-hint" id="cal-active-estimate-hint">Optional. Your full-day estimate replaces Garmin’s active calories so far, plus resting calories from the last full day. Once today ends, Garmin’s actual reading is used instead. Leave blank to use Garmin.{'activeEstimate' in estimate && resolved.activeEstimate === undefined ? ' No completed Garmin resting reading is available yet, so the estimate is not used.' : ''}</p>
+        </>}
       </> : <>
         <NumericField label="Manual calories burned" value={burned} onChange={setBurned} unit="kcal"/>
         <p className="cal-field-hint">This value overrides Garmin for this date, even when imported readings are available.</p>

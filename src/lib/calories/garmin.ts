@@ -28,6 +28,8 @@ export interface EffectiveBurned {
   predictionUnavailable: boolean;
   restingEstimate: boolean;
   unavailable: boolean;
+  /** Set when today's active calories come from the user's estimate (Garmin's reading so far wins once it is higher). */
+  activeEstimate?: number;
 }
 
 export function emptyGarminSnapshot(): GarminSnapshot {
@@ -85,11 +87,17 @@ export function latestCompletedGarminDay(days: readonly GarminDay[], today = tod
 }
 
 /** Today uses active so far plus exactly yesterday's resting energy when both are imported.
+ * An active estimate replaces today's active so far (unless Garmin already counts more) while the day is in progress;
+ * once the day ends the estimate is ignored and Garmin's actual reading is used.
  * A missing date uses the latest completed resting reading as an estimate.
  * Recorded totals and explicit manual overrides keep their existing meaning. */
 export function effectiveBurned(date: string, settings: DaySettings, days: readonly GarminDay[], today = todayISO()): EffectiveBurned {
   const requestedSource = settings.burnedSource === 'manual' ? 'manual' : 'garmin';
   const day = days.find(item => item.date === date);
+  if (requestedSource === 'garmin' && date === today && settings.activeEstimate !== undefined) {
+    const restingDay = days.find(item => item.date === addDays(date, -1)) ?? latestCompletedGarminDay(days, today);
+    if (restingDay) return { burned: Math.max(settings.activeEstimate, day?.active ?? 0) + restingDay.resting, source: 'garmin', requestedSource, day, restingDay, fallback: false, predicted: true, predictionUnavailable: false, restingEstimate: false, unavailable: false, activeEstimate: settings.activeEstimate };
+  }
   if (requestedSource === 'garmin' && day) {
     const restingDay = date === today ? days.find(item => item.date === addDays(date, -1)) : undefined;
     if (restingDay) return { burned: day.active + restingDay.resting, source: 'garmin', requestedSource, day, restingDay, fallback: false, predicted: true, predictionUnavailable: false, restingEstimate: false, unavailable: false };

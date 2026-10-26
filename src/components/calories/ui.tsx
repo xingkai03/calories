@@ -36,17 +36,21 @@ export const newId = () => crypto.randomUUID();
 export const unitLabel = (unit: string, quantity: number) => unit === 'piece' ? (quantity === 1 ? 'piece' : 'pieces') : unit;
 export const previewNumber = (value: string) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
 export const syncTime = (timestamp: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
-export const burnedLabel = (value: EffectiveBurned) => value.source === 'garmin' ? value.unavailable ? 'Garmin unavailable' : value.restingEstimate ? 'Garmin resting estimate' : value.predicted ? 'Garmin prediction' : value.predictionUnavailable ? 'Garmin partial total' : 'Garmin' : 'Manual override';
+export const burnedLabel = (value: EffectiveBurned) => value.source === 'garmin' ? value.unavailable ? 'Garmin unavailable' : value.restingEstimate ? 'Garmin resting estimate' : value.activeEstimate !== undefined ? 'Your active estimate' : value.predicted ? 'Garmin prediction' : value.predictionUnavailable ? 'Garmin partial total' : 'Garmin' : 'Manual override';
 export function burnedFormula(value: EffectiveBurned) {
   if (value.unavailable) return 'No imported total is available for this date, and no completed Garmin resting reading is available yet';
   if (value.restingEstimate && value.restingDay) return `${number(value.restingDay.resting)} resting kcal from ${readableDate(value.restingDay.date, { day: 'numeric', month: 'short', year: 'numeric' })}, used as an estimate for this day`;
+  if (value.activeEstimate !== undefined && value.restingDay) {
+    const active = value.day && value.day.active > value.activeEstimate ? `${number(value.day.active)} active so far (above your ${number(value.activeEstimate)} estimate)` : `${number(value.activeEstimate)} active (your estimate)`;
+    return `${active} + ${number(value.restingDay.resting)} resting (${readableDate(value.restingDay.date, { day: 'numeric', month: 'short' })})`;
+  }
   if (value.predicted && value.day && value.restingDay) return `${number(value.day.active)} active today + ${number(value.restingDay.resting)} resting yesterday (${readableDate(value.restingDay.date, { day: 'numeric', month: 'short' })})`;
   if (value.predictionUnavailable) return 'Yesterday’s resting calories are unavailable. Using Garmin’s partial total so far';
   return value.day ? `${number(value.day.active)} active + ${number(value.day.resting)} resting kcal` : '';
 }
 export function burnedSyncTime(value: EffectiveBurned) {
   if (value.restingEstimate && value.restingDay) return `Resting imported ${syncTime(value.restingDay.synced_at)}`;
-  if (!value.day) return '';
+  if (!value.day) return value.activeEstimate !== undefined && value.restingDay ? `Resting imported ${syncTime(value.restingDay.synced_at)}` : '';
   return value.predicted && value.restingDay && value.day.synced_at !== value.restingDay.synced_at ? `Active updated ${syncTime(value.day.synced_at)} · Resting imported ${syncTime(value.restingDay.synced_at)}` : `Updated ${syncTime(value.day.synced_at)}`;
 }
 export const staleImport = (timestamp: string | null) => Boolean(timestamp && Date.now() - Date.parse(timestamp) > 2 * 60 * 60 * 1000);
@@ -61,8 +65,8 @@ export function ModalHeader({ title, eyebrow, onClose }: { title: string; eyebro
   return <div className="cal-modal-heading"><div><div className="cal-eyebrow">{eyebrow}</div><h2 id="cal-dialog-title">{title}</h2></div><button className="cal-icon-button" type="button" onClick={onClose} aria-label="Close dialog"><Icon name="close"/></button></div>;
 }
 
-export function NumericField({ label, value, onChange, unit = 'g', min = 0, required = true, describedBy }: { label: string; value: string; onChange: (value: string) => void; unit?: string; min?: number; required?: boolean; describedBy?: string }) {
-  return <label>{label}<span className="cal-unit-input"><input type="number" inputMode="decimal" value={value} onChange={event => onChange(event.target.value)} min={min} max={100000000} step="any" required={required} aria-describedby={describedBy}/><span>{unit}</span></span></label>;
+export function NumericField({ label, value, onChange, unit = 'g', min = 0, required = true, describedBy, placeholder }: { label: string; value: string; onChange: (value: string) => void; unit?: string; min?: number; required?: boolean; describedBy?: string; placeholder?: string }) {
+  return <label>{label}<span className="cal-unit-input"><input type="number" inputMode="decimal" value={value} onChange={event => onChange(event.target.value)} min={min} max={100000000} step="any" required={required} placeholder={placeholder} aria-describedby={describedBy}/><span>{unit}</span></span></label>;
 }
 
 

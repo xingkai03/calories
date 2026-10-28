@@ -3,8 +3,10 @@ import { DAILY_PROTEIN_GRAMS } from './nutrition.ts';
 export type Unit = 'g' | 'ml' | 'piece';
 export type FoodState = 'Raw' | 'Cooked' | 'As served';
 export interface Macros { carbs: number; protein: number; fat: number; fiber: number; calories: number }
-export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState }
-export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; source?: 'manual' }
+/** pieceWeight is the weight (g) or volume (ml) of one piece, so a gram or millilitre food can also be logged by the piece. */
+export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState; pieceWeight?: number }
+/** quantity is always in unit; pieces records how many pieces it was when logged by the piece. */
+export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; pieces?: number; source?: 'manual' }
 export type BankItem = Omit<Entry, 'date' | 'meal' | 'source'>;
 export interface BankPortion { id: string; name: string; items: BankItem[] }
 export interface ManualMealInput { id: string; date: string; meal: string; name: string; carbs: number; protein: number; fat: number; fiber: number }
@@ -54,6 +56,16 @@ export function macrosForFood(food: Food, quantity: number): Macros {
   return { carbs: food.carbs * ratio, protein: food.protein * ratio, fat: food.fat * ratio, fiber: food.fiber * ratio, calories: food.calories * ratio };
 }
 
+/** A food logged by the piece needs a piece weight in grams or millilitres. */
+export function canLogPieces(food: Pick<Food, 'unit' | 'pieceWeight'>): boolean {
+  return food.unit !== 'piece' && food.pieceWeight !== undefined && food.pieceWeight > 0;
+}
+
+/** The logged amount in the food's own unit, from either a count of pieces or a weight. */
+export function quantityFromPieces(food: Pick<Food, 'pieceWeight'>, pieces: number): number {
+  return pieces * (food.pieceWeight ?? 0);
+}
+
 export function dayTotals(entries: Entry[]): Macros {
   return entries.reduce((total, item) => ({ carbs: total.carbs + item.carbs, protein: total.protein + item.protein, fat: total.fat + item.fat, fiber: total.fiber + item.fiber, calories: total.calories + item.calories }), { carbs: 0, protein: 0, fat: 0, fiber: 0, calories: 0 });
 }
@@ -77,6 +89,16 @@ function unit(value: unknown): Unit {
 function state(value: unknown): FoodState {
   if (value !== 'Raw' && value !== 'Cooked' && value !== 'As served') throw new Error('Invalid food state.');
   return value;
+}
+function pieceWeight(value: unknown, foodUnit: Unit): { pieceWeight?: number } {
+  if (value === undefined) return {};
+  if (foodUnit === 'piece') throw new Error('Invalid piece weight: a food counted in pieces has no piece weight.');
+  return { pieceWeight: number(value, 'piece weight', true) };
+}
+function pieces(value: unknown, entryUnit: Unit): { pieces?: number } {
+  if (value === undefined) return {};
+  if (entryUnit === 'piece') throw new Error('Invalid piece count: the quantity is already in pieces.');
+  return { pieces: number(value, 'piece count', true) };
 }
 function date(value: unknown): string {
   const s = text(value, 'date', 10);
@@ -122,7 +144,8 @@ export function normalizeData(raw: unknown): TrackerData {
   const foods: Food[] = Array.from(v.foods).map(rawFood => {
     const f = record(rawFood);
     const nutrients = macros(f);
-    return { id: text(f.id, 'food ID'), name: text(f.name, 'food name'), baseQuantity: number(f.baseQuantity, 'base quantity', true), unit: unit(f.unit), state: state(f.state), ...nutrients, calories: number(energyFromMacros(nutrients), 'calculated calories') };
+    const foodUnit = unit(f.unit);
+    return { id: text(f.id, 'food ID'), name: text(f.name, 'food name'), baseQuantity: number(f.baseQuantity, 'base quantity', true), unit: foodUnit, state: state(f.state), ...pieceWeight(f.pieceWeight, foodUnit), ...nutrients, calories: number(energyFromMacros(nutrients), 'calculated calories') };
   });
   const entries: Entry[] = Array.from(v.entries).map(rawEntry => {
     const e = record(rawEntry);
@@ -131,7 +154,8 @@ export function normalizeData(raw: unknown): TrackerData {
     const foodId = text(e.foodId, 'food ID');
     // Older open tabs omit new metadata on save; the canonical identity preserves manual editing.
     const manual = e.source === 'manual' || foodId === `manual:${id}`;
-    return { id, date: date(e.date), meal: text(e.meal, 'meal'), foodId, foodName: text(e.foodName, 'food name'), quantity: number(e.quantity, 'quantity', true), unit: unit(e.unit), state: state(e.state), ...macros(e), ...(manual ? { source: 'manual' as const } : {}) };
+    const entryUnit = unit(e.unit);
+    return { id, date: date(e.date), meal: text(e.meal, 'meal'), foodId, foodName: text(e.foodName, 'food name'), quantity: number(e.quantity, 'quantity', true), unit: entryUnit, state: state(e.state), ...pieces(e.pieces, entryUnit), ...macros(e), ...(manual ? { source: 'manual' as const } : {}) };
   });
   if (new Set(foods.map(f => f.id)).size !== foods.length || new Set(entries.map(e => e.id)).size !== entries.length) throw new Error('The backup contains duplicate IDs.');
   const itemIds = new Set(entries.map(entry => entry.id));
@@ -148,7 +172,8 @@ export function normalizeData(raw: unknown): TrackerData {
       const itemId = text(item.id, 'food-bank ingredient ID');
       if (itemIds.has(itemId)) throw new Error('The backup contains duplicate IDs.');
       itemIds.add(itemId);
-      return { id: itemId, foodId: text(item.foodId, 'food ID'), foodName: text(item.foodName, 'food name'), quantity: number(item.quantity, 'quantity', true), unit: unit(item.unit), state: state(item.state), ...macros(item) };
+      const itemUnit = unit(item.unit);
+      return { id: itemId, foodId: text(item.foodId, 'food ID'), foodName: text(item.foodName, 'food name'), quantity: number(item.quantity, 'quantity', true), unit: itemUnit, state: state(item.state), ...pieces(item.pieces, itemUnit), ...macros(item) };
     });
     return { id, name: text(portion.name, 'food-bank portion name'), items };
   });

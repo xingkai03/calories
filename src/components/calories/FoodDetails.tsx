@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Entry, Food } from '../../lib/calories/model';
 import { foodUsage } from '../../lib/calories/food-order';
-import { Icon, ModalHeader, number, readableDate, unitLabel } from './ui';
+import { Icon, ModalHeader, number, readableDate, unitLabel, amountLabel } from './ui';
 import './food-details.css';
 
 const PAGE = 30;
@@ -25,7 +25,7 @@ export default function FoodDetails({ food, entries, currentDay, onOpenDay, onLo
     {usage.entries.length ? <ol className="cal-food-details-list" aria-label={`Every time ${food.name} was logged`}>
       {usage.entries.slice(0, limit).map(entry => <li key={entry.id}><button type="button" onClick={() => onOpenDay(entry.date)}>
         <span><strong>{readableDate(entry.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</strong><small>{entry.meal}{entry.date > currentDay ? ' · Planned' : ''}</small></span>
-        <span>{number(entry.quantity, 2)} {unitLabel(entry.unit, entry.quantity)}</span>
+        <span>{amountLabel(entry)}</span>
         <span>{number(entry.calories)}<small> kcal</small></span>
         <Icon name="right" size={16}/>
       </button></li>)}

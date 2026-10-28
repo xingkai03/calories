@@ -1,9 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { addDays, dayTotals, emptyData, isCalendarDate, foodListPreferences, normalizeData, settingsForDay, todayISO, FOOD_SORTS, FOOD_WINDOWS, type Entry, type Food, type FoodListPreferences, type FoodSort, type FoodWindow, type TrackerData, type BankPortion } from '../../lib/calories/model';
+import { emptyData, isCalendarDate, foodListPreferences, settingsForDay, todayISO, type Entry, type Food, type FoodListPreferences, type TrackerData, type BankPortion } from '../../lib/calories/model';
 import { createClient, isRecoverableNetworkError, type JournalSnapshot } from '../../lib/calories/client';
 import { effectiveBurned, emptyGarminSnapshot, type GarminSnapshot } from '../../lib/calories/garmin';
-import { DAILY_PROTEIN_GRAMS, macroTargets, nutrientProgress } from '../../lib/calories/nutrition';
-import { adjustedBudget, calorieLedger, carryBefore, outstandingAfter, CARRY_SPREAD_DAYS } from '../../lib/calories/budget';
+import { DAILY_PROTEIN_GRAMS } from '../../lib/calories/nutrition';
+import { calorieLedger, carryBefore } from '../../lib/calories/budget';
 import { rankFoods } from '../../lib/calories/food-order';
 import { FoodBankView, FoodBankEditor, FoodBankConsume } from './FoodBank';
 import { addPreparedPortions, consumeFoodBankPortion } from '../../lib/calories/food-bank';
@@ -12,8 +12,11 @@ import type { FormDraftSummary } from '../../lib/calories/form-drafts';
 import { assertCurrentRecord } from '../../lib/calories/draft-conflicts';
 import { createUndoAction, undoAction, type UndoAction, type UndoKind } from '../../lib/calories/undo';
 import UndoNotice from './UndoNotice';
+import JournalView from './JournalView';
+import FoodsView from './FoodsView';
+import SummaryView from './SummaryView';
 import { applyCaloriesUpdate, CALORIES_UPDATE_EVENT } from '../../lib/calories/offline-shell';
-import { Icon, number, signedNumber, readableDate, errorMessage, syncTime, burnedLabel, burnedFormula, burnedSyncTime, staleImport, garminStatusLabel, downloadFile, unitLabel, amountLabel } from './ui';
+import { Icon, number, errorMessage, downloadFile } from './ui';
 import './calories.css';
 import './offline.css';
 
@@ -23,7 +26,6 @@ const FoodEditor = lazy(() => loadModals().then(m => ({ default: m.FoodEditor })
 const TargetsEditor = lazy(() => loadModals().then(m => ({ default: m.TargetsEditor })));
 const GarminConnection = lazy(() => loadModals().then(m => ({ default: m.GarminConnection })));
 const TransferDialog = lazy(() => loadModals().then(m => ({ default: m.TransferDialog })));
-const TrendsView = lazy(() => import('./TrendsView'));
 const FoodDetails = lazy(() => import('./FoodDetails'));
 const NO_ENTRIES: Entry[] = [];
 
@@ -31,9 +33,6 @@ type View = 'journal' | 'foods' | 'bank' | 'summary';
 const VIEWS: readonly View[] = ['journal', 'foods', 'bank', 'summary'];
 // Links saved before History and Trends became one Summary tab still land there.
 const LEGACY_VIEWS: Record<string, View> = { history: 'summary', trends: 'summary' };
-const HISTORY_PAGE = 60;
-const WINDOW_LABELS: Record<FoodWindow, string> = { 7: 'Last 7 days', 14: 'Last 14 days', 30: 'Last 30 days', 90: 'Last 90 days', 0: 'All time' };
-const SORT_LABELS: Record<FoodSort, string> = { frequent: 'Most logged', recent: 'Recently logged', name: 'Name (A–Z)' };
 
 /** View and date live in the URL, so Back, reload and shared links land on the same screen. */
 function locationState(): { view: View; date: string | null } {
@@ -53,7 +52,7 @@ function urlFor(view: View, date: string, currentDay: string): string {
 }
 type Phase = 'loading' | 'setup' | 'login' | 'ready';
 type SaveState = 'saved' | 'pending' | 'saving' | 'device' | 'offline' | 'error';
-type ModalState = { type: 'entry'; entry?: Entry; foodId?: string; meal?: string } | { type: 'food'; food?: Food; returnToLog?: boolean } | { type: 'targets' } | { type: 'transfer' } | { type: 'garmin' } | { type: 'bank-prepare' } | { type: 'bank-consume'; portion: BankPortion } | { type: 'food-details'; food: Food } | null;
+export type ModalState = { type: 'entry'; entry?: Entry; foodId?: string; meal?: string } | { type: 'food'; food?: Food; returnToLog?: boolean } | { type: 'targets' } | { type: 'transfer' } | { type: 'garmin' } | { type: 'bank-prepare' } | { type: 'bank-consume'; portion: BankPortion } | { type: 'food-details'; food: Food } | null;
 
 
 export default function CaloriesApp({ clientOverride }: { clientOverride?: ReturnType<typeof createClient> } = {}) {
@@ -91,8 +90,6 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   phaseRef.current = phase;
   const [foodSearch, setFoodSearch] = useState('');
   const [showAllLibrary, setShowAllLibrary] = useState(false);
-  const [deleteFoodId, setDeleteFoodId] = useState<string | null>(null);
-  const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE);
   const [trendsNotice, setTrendsNotice] = useState('');
   const [updateWorker, setUpdateWorker] = useState<ServiceWorker | null>(null);
   const queue = useRef<TrackerData | null>(null);
@@ -179,7 +176,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
       }
       if (modalInHistory.current) { modalInHistory.current = false; setModal(null); return; }
       const next = locationState();
-      setView(next.view); setDate(next.date ?? current.currentDay); setDeleteFoodId(null);
+      setView(next.view); setDate(next.date ?? current.currentDay);
     }
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -430,8 +427,8 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     await updateWithUndo('delete-entry', id, current => ({ ...current, entries: current.entries.filter(entry => entry.id !== id) }), before => `Removed ${before.entries.find(entry => entry.id === id)?.foodName ?? 'entry'}.`);
   }
 
-  async function removeFood(id: string) {
-    if (await updateWithUndo('delete-food', id, current => ({ ...current, foods: current.foods.filter(food => food.id !== id) }), before => `Removed ${before.foods.find(food => food.id === id)?.name ?? 'food'} from the library.`)) setDeleteFoodId(null);
+  function removeFood(id: string): Promise<boolean> {
+    return updateWithUndo('delete-food', id, current => ({ ...current, foods: current.foods.filter(food => food.id !== id) }), before => `Removed ${before.foods.find(food => food.id === id)?.name ?? 'food'} from the library.`);
   }
 
   async function removeBankPortion(id: string) {
@@ -517,7 +514,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   function openFoodBank() { setModal(null); setView('bank'); }
 
   function openDay(nextDate: string) { setDate(nextDate); if (view !== 'journal') navigationMode.current = 'push'; setView('journal'); }
-  function changeView(next: View) { if (next !== view) navigationMode.current = 'push'; setView(next); setDeleteFoodId(null); setHistoryLimit(HISTORY_PAGE); setTrendsNotice(''); }
+  function changeView(next: View) { if (next !== view) navigationMode.current = 'push'; setView(next); setTrendsNotice(''); }
 
   function resumeFormDraft(draft: FormDraftSummary) {
     setRecoveryNotice('');
@@ -540,38 +537,21 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     return map;
   }, [data.entries]);
   const dayEntries = entriesByDate.get(date) ?? NO_ENTRIES;
-  const totals = useMemo(() => dayTotals(dayEntries), [dayEntries]);
   const targets = settingsForDay(data, date, entriesByDate.has(date));
   const burned = effectiveBurned(date, targets, garmin.days, currentDay);
-  const burnedSyncDay = burned.day ?? burned.restingDay;
   const ledger = useMemo(() => calorieLedger(data, garmin.days, currentDay), [data, garmin.days, currentDay]);
   const carryIn = carryBefore(date, ledger);
   const carryIsProvisional = Boolean(ledger.provisional && date > ledger.provisional.date);
-  const allowance = adjustedBudget(burned.burned, targets.deficit, carryIn);
-  const budget = allowance.budget;
-  const remaining = budget - totals.calories;
-  const selectedBalance = ledger.days[date];
-  const rawBalance = selectedBalance ? selectedBalance.balance : outstandingAfter(date, ledger);
-  const hasPendingLoggedDays = Object.values(ledger.days).some(row => row.date < currentDay && !row.available);
-  const deficit = burned.burned - totals.calories;
-  const calorieProgress = nutrientProgress(totals.calories, budget);
-  const nutritionTargets = macroTargets(budget);
-  const meals = useMemo(() => [...new Set(dayEntries.map(entry => entry.meal))], [dayEntries]);
   const foodList = foodListPreferences(data);
   const ranked = useMemo(() => rankFoods(data.foods, data.entries, currentDay, foodList), [data.foods, data.entries, currentDay, foodList.window, foodList.sort]);
   const sortedFoods = ranked.foods;
   const recentIds = ranked.usedIds;
-  // Without a search, the library shows only foods logged in the chosen window, unless none were.
-  const hideUnusedFoods = !showAllLibrary && !foodSearch.trim() && Boolean(recentIds?.size);
-  const visibleFoods = useMemo(() => { const query = foodSearch.trim().toLowerCase(); return sortedFoods.filter(food => food.name.toLowerCase().includes(query) && (!hideUnusedFoods || recentIds?.has(food.id))); }, [sortedFoods, foodSearch, hideUnusedFoods, recentIds]);
-  const hiddenLibraryFoods = hideUnusedFoods ? sortedFoods.length - visibleFoods.length : 0;
   const lastQuantities = useMemo(() => {
     const latest = new Map<string, Entry>();
     for (const entry of data.entries) if (entry.source !== 'manual') { const seen = latest.get(entry.foodId); if (!seen || entry.date >= seen.date) latest.set(entry.foodId, entry); }
     return Object.fromEntries([...latest].map(([foodId, entry]) => [foodId, { quantity: entry.quantity, ...(entry.pieces !== undefined ? { pieces: entry.pieces } : {}) }]));
   }, [data.entries]);
   const libraryIds = useMemo(() => new Set(data.foods.map(food => food.id)), [data.foods]);
-  const historyDates = useMemo(() => [...new Set([...entriesByDate.keys(), ...Object.keys(data.days)])].sort().reverse(), [entriesByDate, data.days]);
 
   return <div className="calorie-app">
     {updateWorker && <div className="cal-update-banner" role="status"><span>A new version of Calories is ready.</span><button className="cal-button cal-button-small cal-button-primary" onClick={() => void reloadForUpdate()}><Icon name="refresh" size={16}/>Reload</button></div>}
@@ -611,96 +591,16 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
 
       <main className="cal-main">
         <DraftRecovery onResume={resumeFormDraft} notice={recoveryNotice}/>
-        {view === 'journal' && <>
-          <section className="cal-page-heading">
-            <div><h1>{readableDate(date, { weekday: 'long' })}<span className="cal-heading-dot">.</span></h1><p>{readableDate(date, { day: 'numeric', month: 'long', year: 'numeric' })}</p></div>
-            <div className="cal-date-controls"><button className="cal-icon-button" onClick={() => openDay(addDays(date, -1))} aria-label="Previous day"><Icon name="left"/></button><label className="cal-date-picker"><Icon name="calendar" size={17}/><span aria-hidden="true">{readableDate(date, { day: 'numeric', month: 'short', year: 'numeric' })}</span><input type="date" aria-label="Choose journal date" value={date} onClick={event => { try { event.currentTarget.showPicker?.(); } catch { /* The native control still opens on focus. */ } }} onChange={event => { if (event.target.value) openDay(event.target.value); }}/></label><button className="cal-icon-button" onClick={() => openDay(addDays(date, 1))} aria-label="Next day"><Icon name="right"/></button>{date !== currentDay && <button className="cal-text-button cal-today" onClick={() => openDay(currentDay)}>Today</button>}</div>
-          </section>
-
-          <section className="cal-dashboard" aria-label="Daily nutrition summary">
-            <div className="cal-energy-card">
-              <div className="cal-card-top"><span className="cal-eyebrow">{date === currentDay ? 'ENERGY TODAY' : 'ENERGY THIS DAY'}</span><button className="cal-icon-button" onClick={() => setModal({ type: 'targets' })} aria-label="Edit daily targets" title="Edit daily targets"><Icon name="settings" size={19}/></button></div>
-              <div className="cal-energy-main"><div><div className="cal-energy-value">{number(totals.calories)}<span>kcal</span></div><p>of {number(budget, 1)} kcal {burned.predicted ? 'predicted ' : ''}budget with carry</p></div><div className={`cal-ring${calorieProgress.overPercent > 0 ? ' cal-ring-over' : ''}`} style={{ '--cal-progress': `${calorieProgress.barPercent}%`, '--cal-over': `${calorieProgress.overPercent}%` } as React.CSSProperties}><div><span>{calorieProgress.percent === null ? '—' : <>{number(calorieProgress.percent)}<small>%</small></>}</span><small>{budget > 0 ? 'of budget' : 'no budget'}</small></div></div></div>
-              <div className="cal-energy-bottom"><span>{remaining >= 0 ? 'Remaining' : 'Above budget'}<strong>{number(Math.abs(remaining), 1)} <small>kcal</small></strong></span><span>{burned.predicted ? 'Predicted burned' : burned.restingEstimate ? 'Estimated burned' : 'Burned'}<strong>{burned.unavailable ? '—' : number(burned.burned)} <small>kcal</small></strong></span><span>{burned.unavailable ? 'Deficit / surplus' : burned.predicted ? deficit >= 0 ? 'Predicted deficit' : 'Predicted surplus' : burned.restingEstimate ? deficit >= 0 ? 'Estimated deficit' : 'Estimated surplus' : deficit >= 0 ? 'Deficit' : 'Surplus'}<strong>{burned.unavailable ? '—' : number(Math.abs(deficit))} <small>kcal</small></strong></span></div>
-              <div className="cal-target-note"><span>Deficit target: {number(targets.deficit, 1)} kcal</span><button className="cal-text-button" onClick={() => setModal({ type: 'targets' })}>Edit deficit target<Icon name="edit" size={13}/></button>{date === currentDay && burned.requestedSource === 'garmin' && <button className="cal-text-button" onClick={() => setModal({ type: 'targets' })}>{targets.activeEstimate === undefined ? 'Estimate active calories' : 'Edit active estimate'}<Icon name="edit" size={13}/></button>}</div>
-              <div className="cal-burned-source"><span className="cal-source-badge">{burnedLabel(burned)}</span>{burned.source === 'garmin' ? <div className="cal-burned-details"><span>{burnedFormula(burned)}</span>{burnedSyncDay && <small>{burnedSyncTime(burned)}{date === currentDay ? ' · Today is provisional' : ''}{garmin.status.state === 'not_connected' ? ' · Automatic imports stopped' : date === currentDay && staleImport(burnedSyncDay.synced_at) ? ' · Needs a new import' : ''}</small>}</div> : <span>Your saved manual calories burned value.</span>}</div>
-            </div>
-            <div className="cal-nutrients-card">
-              <div className="cal-card-top"><span className="cal-eyebrow">DAILY NUTRIENT TARGETS</span><span className="cal-pill">grams</span></div>
-              <div className="cal-macro-progress-list">
-                <MacroProgressRow name="Protein" consumed={totals.protein} target={nutritionTargets.protein} tone="protein"/>
-                <MacroProgressRow name="Carbs" consumed={totals.carbs} target={nutritionTargets.carbs} tone="carbs"/>
-                <MacroProgressRow name="Fat" consumed={totals.fat} target={nutritionTargets.fat} tone="fat"/>
-                <MacroProgressRow name="Fibre" consumed={totals.fiber} target={nutritionTargets.fiber} tone="fiber"/>
-              </div>
-              {nutritionTargets.budgetTooLow && <p className="cal-macro-budget-note">Current calorie budget is too low for {DAILY_PROTEIN_GRAMS} g protein and 25% fat. Carb target is 0 g.</p>}
-            </div>
-          </section>
-
-          <section className="cal-carry-panel" aria-label="Running calorie balance">
-            <div className="cal-carry-heading"><h2>Running calorie balance</h2><span>{burned.unavailable ? 'Waiting for Garmin' : selectedBalance?.settled ? 'Carried forward' : carryIsProvisional ? 'Future projection' : date === currentDay ? 'Today is provisional' : dayEntries.length ? 'Not settled yet' : 'Unlogged day'}</span></div>
-            <div className="cal-carry-values"><span>Base budget<strong>{burned.unavailable ? '—' : number(allowance.baseBudget, 1)} <small>kcal</small></strong></span><span>Carry from last {CARRY_SPREAD_DAYS} days{carryIsProvisional ? ' (provisional)' : ''}<strong>{signedNumber(carryIn)} <small>kcal</small></strong></span><span>{selectedBalance ? 'Still to carry after this day' : 'Still to carry'}<strong>{burned.unavailable ? '—' : signedNumber(rawBalance)} <small>kcal</small></strong></span></div>
-            <details className="cal-carry-details"><summary>How the running balance works</summary><p>Each logged day’s difference from its budget is spread evenly over the next {CARRY_SPREAD_DAYS} days: eating 700 kcal over takes 100 kcal off each of the next {CARRY_SPREAD_DAYS} budgets, and eating under adds it the same way. Eating exactly your budget adds nothing new. Completed logged days settle.{date === currentDay ? ledger.provisional ? ' Today’s balance is provisional and is included when previewing later days.' : dayEntries.length ? ' Today’s carry is waiting for calories burned.' : ' Today has no logged food, so it does not add to carry.' : !dayEntries.length ? ' This day has no logged food, so it does not add to carry.' : date > currentDay ? ' Planned future meals do not carry forward yet.' : ''}</p></details>
-            {carryIsProvisional && <p>Includes today’s provisional balance; updates as food or Garmin data changes.</p>}
-            {hasPendingLoggedDays && <p className="cal-carry-pending-note">Some logged days are waiting for Garmin data. Their balances are not included yet.</p>}
-            {!burned.unavailable && allowance.deferredDebt > 0 && <p className="cal-carry-debt-note">If you eat this day’s {number(budget, 1)} kcal budget, {number(allowance.deferredDebt, 1)} kcal of debt remains for later days.</p>}
-          </section>
-
-          <button className={`cal-garmin-bar ${garmin.status.state === 'needs_login' || garmin.status.state === 'error' || (garmin.status.state === 'connected' && staleImport(garmin.status.last_sync_at)) || garminLoadError ? 'cal-garmin-attention' : ''}`} onClick={() => setModal({ type: 'garmin' })} aria-label="Garmin Connect settings">
-            <span className="cal-garmin-symbol"><Icon name="watch" size={20}/></span><span className="cal-garmin-bar-text"><strong>Garmin Connect</strong><span>{garminLoading ? 'Checking imported data…' : garminLoadError ? 'Unable to refresh · saved readings retained' : garminStatusLabel(garmin.status)}{!garminLoading && !garminLoadError && garmin.status.last_sync_at ? ` · Last import ${syncTime(garmin.status.last_sync_at)}` : ''}</span></span><Icon name="right" size={18}/>
-          </button>
-
-          <section className="cal-journal-section">
-            <div className="cal-section-heading cal-section-actions"><h2 className="cal-sr-only">Meals</h2><button className="cal-button cal-button-primary" onClick={() => setModal({ type: 'entry' })}><Icon name="plus" size={18}/>Log food</button></div>
-            {dayEntries.length === 0 ? <div className="cal-empty-journal"><span className="cal-empty-art"><Icon name="leaf" size={38}/><span/><span/></span><h3>No food logged {date === currentDay ? 'today' : 'this day'}.</h3><p>Choose a saved food or enter a manual estimate for a meal.</p><button className="cal-text-button" onClick={() => setModal({ type: 'entry' })}>Log food<Icon name="arrow" size={17}/></button></div>
-              : <div className="cal-meals">{meals.map((meal, index) => {
-                const entries = dayEntries.filter(entry => entry.meal === meal);
-                const mealTotals = dayTotals(entries);
-                return <div className="cal-meal" key={meal}><div className="cal-meal-heading"><span className="cal-meal-number">{String(index + 1).padStart(2, '0')}</span><h3>{meal}</h3><span>{number(mealTotals.calories)} kcal</span></div><div className="cal-entry-list">{entries.map(entry => <div className="cal-entry" key={entry.id}><div className="cal-entry-info"><strong>{entry.foodName}</strong><span>{entry.source === 'manual' ? 'Manual estimate' : <>{amountLabel(entry)}<i/> {entry.state}</>}</span></div><div className="cal-entry-macros"><span><b>P</b> {number(entry.protein, 1)}<small> g</small></span><span><b>C</b> {number(entry.carbs, 1)}<small> g</small></span><span><b>F</b> {number(entry.fat, 1)}<small> g</small></span><span><b>Fibre</b> {number(entry.fiber, 1)}<small> g</small></span></div><strong className="cal-entry-energy">{number(entry.calories)}<small> kcal</small></strong><div className="cal-entry-actions">{entry.source !== 'manual' && libraryIds.has(entry.foodId) && <button className="cal-icon-button" onClick={() => setModal({ type: 'entry', foodId: entry.foodId })} aria-label={`Log ${entry.foodName} again`} title="Log again"><Icon name="plus" size={16}/></button>}<button className="cal-icon-button" onClick={() => setModal({ type: 'entry', entry })} aria-label={`Edit ${entry.foodName}`}><Icon name="edit" size={16}/></button><button className="cal-icon-button" onClick={() => void removeEntry(entry.id)} aria-label={`Remove ${entry.foodName}`} title="Remove (you can undo)"><Icon name="trash" size={16}/></button></div></div>)}</div></div>;
-              })}</div>}
-          </section>
-        </>}
+        {view === 'journal' && <JournalView date={date} currentDay={currentDay} dayEntries={dayEntries} targets={targets} burned={burned} ledger={ledger} carryIn={carryIn} carryIsProvisional={carryIsProvisional} garmin={garmin} garminLoading={garminLoading} garminLoadError={garminLoadError} libraryIds={libraryIds} onOpenDay={openDay} onModal={setModal} onRemoveEntry={removeEntry}/>}
 
         {view === 'bank' && <>
           <h1 className="cal-sr-only">Food bank</h1>
           <FoodBankView portions={data.foodBank} onPrepare={() => setModal({ type: 'bank-prepare' })} onEat={portion => setModal({ type: 'bank-consume', portion })} onRemove={id => void removeBankPortion(id)}/>
         </>}
 
-        {view === 'foods' && <>
-          <h1 className="cal-sr-only">Foods</h1>
-          <div className="cal-library-bar"><label className="cal-search"><Icon name="search" size={19}/><input type="search" placeholder="Find a food…" aria-label="Search food library" value={foodSearch} onChange={event => setFoodSearch(event.target.value)}/></label><div className="cal-library-options"><label>Show<select value={foodList.window} onChange={event => void saveFoodList({ window: Number(event.target.value) as FoodWindow })}>{FOOD_WINDOWS.map(option => <option key={option} value={option}>{option ? `Logged in the ${WINDOW_LABELS[option].toLowerCase()}` : 'All foods'}</option>)}</select></label><label>Sort<select value={foodList.sort} onChange={event => void saveFoodList({ sort: event.target.value as FoodSort })}>{FOOD_SORTS.map(option => <option key={option} value={option}>{SORT_LABELS[option]}{option === 'frequent' && foodList.window ? `, ${WINDOW_LABELS[foodList.window].toLowerCase()}` : ''}</option>)}</select></label></div><button className="cal-button cal-button-primary" onClick={() => setModal({ type: 'food' })}><Icon name="plus" size={18}/>Add food</button></div>
-          <p className="cal-library-count">{hiddenLibraryFoods ? <>{visibleFoods.length} of {data.foods.length} foods · <button className="cal-text-button" type="button" onClick={() => setShowAllLibrary(true)}>Show all</button></> : <>{data.foods.length} {data.foods.length === 1 ? 'food' : 'foods'}{showAllLibrary && recentIds?.size && !foodSearch.trim() ? <> · <button className="cal-text-button" type="button" onClick={() => setShowAllLibrary(false)}>Show {WINDOW_LABELS[foodList.window].toLowerCase()} only</button></> : null}</>}</p>
-          {visibleFoods.length ? <div className="cal-food-grid">{visibleFoods.map(food => <article className="cal-food-card" key={food.id}><div className="cal-food-heading"><span className="cal-food-state">{food.state}</span><div>{deleteFoodId === food.id ? <button className="cal-text-button" onClick={() => setDeleteFoodId(null)}>Cancel</button> : <button className="cal-icon-button" onClick={() => setModal({ type: 'food', food })} aria-label={`Edit ${food.name}`}><Icon name="edit" size={17}/></button>}</div></div><h2><button type="button" className="cal-food-name-button" onClick={() => setModal({ type: 'food-details', food })}>{food.name}</button></h2><p>Per {number(food.baseQuantity, 2)} {unitLabel(food.unit, food.baseQuantity)}{food.pieceWeight !== undefined && food.unit !== 'piece' ? ` · 1 piece = ${number(food.pieceWeight, 2)} ${food.unit}` : ''}</p><div className="cal-food-energy"><strong>{number(food.calories)}</strong><span>kcal</span></div><div className="cal-food-macros"><span>Protein<strong>{number(food.protein, 1)} g</strong></span><span>Carbs<strong>{number(food.carbs, 1)} g</strong></span><span>Fat<strong>{number(food.fat, 1)} g</strong></span><span>Fibre<strong>{number(food.fiber, 1)} g</strong></span></div><div className="cal-food-footer">{deleteFoodId === food.id ? <><p>Existing log entries will be kept.</p><button className="cal-text-button cal-danger" onClick={() => void removeFood(food.id)}>Remove food</button></> : <><button className="cal-text-button" onClick={() => setModal({ type: 'entry', foodId: food.id })}>Log this food<Icon name="plus" size={16}/></button><span className="cal-food-footer-tools"><button className="cal-icon-button" onClick={() => setModal({ type: 'food-details', food })} aria-label={`Details for ${food.name}`} title="When and how much you ate it"><Icon name="history" size={16}/></button><button className="cal-icon-button" onClick={() => setDeleteFoodId(food.id)} aria-label={`Remove ${food.name} from library`}><Icon name="trash" size={16}/></button></span></>}</div></article>)}</div> : <div className="cal-empty-journal cal-library-empty"><span className="cal-empty-art"><Icon name="book" size={36}/></span><h3>{foodSearch ? 'No foods found.' : 'No foods yet.'}</h3><p>{foodSearch ? 'Try a different name, or add a new food.' : 'Add a food using the nutrition on its label.'}</p><button className="cal-text-button" onClick={() => setModal({ type: 'food' })}>Add a food<Icon name="plus" size={17}/></button></div>}
-        </>}
+        {view === 'foods' && <FoodsView foods={data.foods} sortedFoods={sortedFoods} recentIds={recentIds} foodList={foodList} search={foodSearch} onSearch={setFoodSearch} showAll={showAllLibrary} onShowAll={setShowAllLibrary} onSaveFoodList={saveFoodList} onModal={setModal} onRemoveFood={removeFood}/>}
 
-        {view === 'summary' && <>
-          <h1 className="cal-sr-only">Summary</h1>
-          <Suspense fallback={<div className="cal-loading" role="status"><span className="cal-spinner"/></div>}><TrendsView data={data} garminDays={garmin.days} currentDay={currentDay} onApplyDeficit={applyPlanDeficit} notice={trendsNotice}/></Suspense>
-          <div className="cal-section-heading cal-summary-days"><h2>Days</h2><button className="cal-button" onClick={() => setModal({ type: 'transfer' })}><Icon name="download" size={18}/>Export journal</button></div>
-          {hasPendingLoggedDays && <p className="cal-history-pending-note">Some logged days are waiting for Garmin data. Their balances are not included yet.</p>}
-          {historyDates.length ? <div className="cal-history">
-            <div className="cal-history-header"><span>Day</span><span>Energy</span><span className="cal-history-protein">Protein</span><span className="cal-history-deficit">Deficit / surplus</span><span className="cal-history-balance">Still to carry</span><span/></div>
-            {historyDates.slice(0, historyLimit).map(day => {
-              const entries = entriesByDate.get(day) ?? NO_ENTRIES;
-              const dayTotal = dayTotals(entries);
-              const goals = settingsForDay(data, day, entries.length > 0);
-              const dayBurned = effectiveBurned(day, goals, garmin.days, currentDay);
-              const dayDeficit = dayBurned.burned - dayTotal.calories;
-              const balance = ledger.days[day];
-              return <button className="cal-history-row" key={day} onClick={() => openDay(day)}>
-                <span><strong>{readableDate(day, { weekday: 'short', day: 'numeric', month: 'short' })}</strong><small className="cal-history-mobile-summary">{number(dayTotal.protein, 1)} g protein{entries.length && !dayBurned.unavailable ? ` · ${number(Math.abs(dayDeficit))} kcal ${dayDeficit >= 0 ? 'deficit' : 'surplus'}` : ''}</small><small>{entries.length} {entries.length === 1 ? 'entry' : 'entries'} · {day.slice(0, 4)}<em className="cal-history-source">{burnedLabel(dayBurned)}{dayBurned.source === 'garmin' && !dayBurned.unavailable && day === currentDay ? ' · provisional' : ''}</em>{dayBurned.restingEstimate && dayBurned.restingDay && <em className="cal-history-source">Resting from {readableDate(dayBurned.restingDay.date, { day: 'numeric', month: 'short', year: 'numeric' })} · {burnedSyncTime(dayBurned)}</em>}</small></span>
-                <span><strong>{number(dayTotal.calories, 1)}</strong><small> kcal</small></span>
-                <span className="cal-history-protein"><strong>{number(dayTotal.protein, 1)}</strong><small> g</small></span>
-                <span className="cal-history-deficit"><strong>{entries.length && !dayBurned.unavailable ? number(Math.abs(dayDeficit), 1) : '—'}</strong><small>{dayBurned.unavailable ? 'Burned unavailable' : entries.length ? ` kcal ${dayBurned.restingEstimate ? 'estimated ' : ''}${dayDeficit >= 0 ? 'deficit' : 'surplus'}` : ' Unlogged'}</small></span>
-                <span className="cal-history-balance"><strong>{balance?.available ? signedNumber(balance.balance) : '—'}</strong><small>{balance ? !balance.available ? 'Waiting for Garmin' : `kcal · ${balance.settled ? 'carried forward' : day === currentDay ? 'provisional' : ledger.provisional && day > ledger.provisional.date ? 'planned · provisional carry' : 'not settled'}` : 'No logged food'}</small></span>
-                <Icon name="right" size={18}/>
-              </button>;
-            })}
-          </div> : null}
-          {historyDates.length > historyLimit && <button className="cal-button cal-history-more" onClick={() => setHistoryLimit(limit => limit + HISTORY_PAGE)}>Show older days ({number(historyDates.length - historyLimit)} more)</button>}
-          {historyDates.length ? null : <div className="cal-empty-journal"><span className="cal-empty-art"><Icon name="calendar" size={36}/></span><h3>No days logged yet.</h3><p>Days you log will appear here, with your daily totals and running calorie balance.</p><button className="cal-text-button" onClick={() => openDay(currentDay)}>Go to today<Icon name="arrow" size={17}/></button></div>}
-
-        </>}
+        {view === 'summary' && <SummaryView data={data} garminDays={garmin.days} currentDay={currentDay} ledger={ledger} entriesByDate={entriesByDate} trendsNotice={trendsNotice} onApplyDeficit={applyPlanDeficit} onOpenDay={openDay} onExport={() => setModal({ type: 'transfer' })}/>}
       </main>
 
       {view === 'journal' && !modal && <button className={`cal-fab${undoNotice ? ' cal-fab-raised' : ''}`} onClick={() => setModal({ type: 'entry' })}><Icon name="plus" size={20}/>Log food</button>}
@@ -731,18 +631,6 @@ function DraftRecovery({ onResume, notice }: { onResume: (draft: FormDraftSummar
   const { drafts, discard } = useFormDrafts();
   if (!drafts.length) return null;
   return <section className="cal-draft-recovery" aria-label="Unfinished drafts"><div><strong>Unfinished forms</strong><p>Saved on this device.</p></div>{notice && <p role="status">{notice}</p>}<ul>{drafts.map(draft => <li key={draft.key}><span>{draft.label}</span><div><button className="cal-text-button" onClick={() => onResume(draft)}>Resume<span className="cal-sr-only"> {draft.label}</span></button><button className="cal-icon-button" onClick={() => discard(draft.key)} aria-label={`Discard ${draft.label} draft`}><Icon name="close" size={16}/></button></div></li>)}</ul></section>;
-}
-
-function MacroProgressRow({ name, consumed, target, tone }: { name: string; consumed: number; target: number; tone: 'protein' | 'carbs' | 'fat' | 'fiber' }) {
-  const progress = nutrientProgress(consumed, target);
-  const percent = progress.percent === null ? '—' : `${number(progress.percent, 1)}%`;
-  const remaining = target - consumed;
-  const detail = target === 0 ? consumed > 0 ? `${number(consumed, 1)} g over a zero target` : 'Target is 0 g for this budget' : remaining > 0 ? `${number(remaining, 1)} g remaining` : remaining < 0 ? `${number(-remaining, 1)} g over target` : 'Target reached';
-  return <div className={`cal-macro-progress-row cal-macro-tone-${tone}`}>
-    <div className="cal-macro-progress-heading"><span className="cal-macro-name">{name}</span><span className="cal-macro-consumed"><strong>{number(consumed, 1)}</strong><small> / {number(target, 1)} g</small></span><span className="cal-macro-percentage" aria-label={progress.percent === null ? `${name} percentage unavailable` : `${number(progress.percent, 1)} percent of ${name.toLowerCase()} target consumed`}>{percent}</span></div>
-    <div className="cal-progress-track" role="progressbar" aria-label={`${name} target progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.barPercent} aria-valuetext={`${number(consumed, 1)} of ${number(target, 1)} grams; ${progress.percent === null ? 'percentage unavailable' : `${number(progress.percent, 1)} percent of target consumed`}`}><span style={{ width: `${progress.barPercent}%` }}/></div>
-    <p className={remaining < 0 ? 'cal-macro-over' : ''}>{detail}</p>
-  </div>;
 }
 
 function Setup({ onConfigure }: { onConfigure: (config: { url: string; key: string; email?: string }) => void }) {

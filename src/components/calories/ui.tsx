@@ -34,6 +34,8 @@ export const readableDate = (date: string, options: Intl.DateTimeFormatOptions) 
 export const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 export const newId = () => crypto.randomUUID();
 export const unitLabel = (unit: string, quantity: number) => unit === 'piece' ? (quantity === 1 ? 'piece' : 'pieces') : unit;
+/** How much was logged: "2 pieces · 38 g" when logged by the piece, otherwise "38 g". */
+export const amountLabel = (item: { quantity: number; unit: string; pieces?: number }) => `${item.pieces !== undefined ? `${number(item.pieces, 2)} ${unitLabel('piece', item.pieces)} · ` : ''}${number(item.quantity, 2)} ${unitLabel(item.unit, item.quantity)}`;
 export const previewNumber = (value: string) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
 export const syncTime = (timestamp: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
 export const burnedLabel = (value: EffectiveBurned) => value.source === 'garmin' ? value.unavailable ? 'Garmin unavailable' : value.restingEstimate ? 'Garmin resting estimate' : value.activeEstimate !== undefined ? 'Your active estimate' : value.predicted ? 'Garmin prediction' : value.predictionUnavailable ? 'Garmin partial total' : 'Garmin' : 'Manual override';

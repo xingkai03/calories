@@ -4,14 +4,14 @@ import { normalizeGarminSnapshot, type GarminSnapshot } from './garmin.ts';
 import { normalizeFoodPhotoDraft, normalizeFoodPhotoRequest, type FoodPhotoDraft, type FoodPhotoRequest } from './food-photos.ts';
 import { normalizeMealPhotoDraft, normalizeMealPhotoRequest, type MealPhotoDraft, type MealPhotoRequest } from './meal-photos.ts';
 import { withMealPhotoDeadline } from './meal-photo-deadline.ts';
+import { browserJournalStore, storageJournalStore, type JournalStore, type StorageLike } from './journal-store.ts';
 import { JournalConflictError, RecoverableNetworkError, isRecoverableNetworkError, journalCacheKey, journalEqual, mergeJournals, normalizeJournalCache, withJournalLock, type JournalCache, type JournalSnapshot } from './offline.ts';
 export { isRecoverableNetworkError } from './offline.ts';
 export type { JournalSnapshot } from './offline.ts';
 
 export interface Configuration { url: string; key: string; email?: string }
 interface Session { accessToken: string; refreshToken: string; userId: string; email: string; expiresAt: number; deadline: number; remember: boolean }
-interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
-export interface ClientOptions { url?: string; key?: string; localStorage?: StorageLike; sessionStorage?: StorageLike; fetch?: typeof fetch; now?: () => number }
+export interface ClientOptions { url?: string; key?: string; localStorage?: StorageLike; sessionStorage?: StorageLike; journalStore?: JournalStore; fetch?: typeof fetch; now?: () => number }
 const CONFIG_KEY = 'calories.connection.v1';
 export const REMEMBER_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -36,6 +36,8 @@ export function createClient(options: ClientOptions = {}) {
   const now = options.now ?? Date.now;
   const local = options.localStorage ?? (typeof window !== 'undefined' ? window.localStorage : undefined);
   const tab = options.sessionStorage ?? (typeof window !== 'undefined' ? window.sessionStorage : undefined);
+  // The journal and Garmin copies are large, so the browser keeps them in IndexedDB; small settings stay in localStorage.
+  const store = options.journalStore ?? (options.localStorage ? storageJournalStore(options.localStorage) : browserJournalStore(local));
   const buildEnv = (import.meta as ImportMeta & { env?: Record<string, string> }).env;
   let configuration: Configuration | null = null;
   try {
@@ -45,15 +47,14 @@ export function createClient(options: ClientOptions = {}) {
     if (stored) configuration = validateConfiguration(JSON.parse(stored));
   } catch { /* Invalid configuration is repaired through Connect storage. */ }
   let session: Session | null = null;
-  let revision: number | null | undefined;
   let refreshPromise: Promise<void> | null = null;
-  let needsReload = false;
-  let saving = false;
   let authGeneration = 0;
   let journalOffline = false;
   let journalSync: Promise<JournalSnapshot> | null = null;
   let lastJournalVersion: string | undefined;
   const observedJournals = new Map<string, TrackerData>();
+  // The last journal cache read or written here. A matching version key skips re-reading and re-validating it.
+  let cacheMemo: { key: string; cache: JournalCache } | null = null;
 
   function config(): Configuration {
     if (!configuration) throw new Error('Connect your Supabase project first.');
@@ -65,10 +66,20 @@ export function createClient(options: ClientOptions = {}) {
     const current = storedSession();
     return current && current.deadline > now() ? `${config().url}:${current.userId}` : null;
   }
-  function cacheFor(current: Session, verified = true): JournalCache | null {
-    const encoded = local?.getItem(journalCacheKey(config().url, current.userId));
-    if (!encoded) return null;
-    const cache = normalizeJournalCache(JSON.parse(encoded), config().url, current.userId);
+  const versionKey = (cacheKey: string) => `${cacheKey}#version`;
+  const garminKey = (owner: string) => `calories.garmin.v1:${config().url}:${owner}`;
+  async function cacheFor(current: Session, verified = true): Promise<JournalCache | null> {
+    if (!store) return null;
+    const key = journalCacheKey(config().url, current.userId);
+    const version = await store.get(versionKey(key));
+    let cache: JournalCache;
+    if (cacheMemo?.key === key && version === cacheMemo.cache.localVersion) cache = cacheMemo.cache;
+    else {
+      const raw = await store.get(key);
+      if (raw === undefined || raw === null) return null;
+      cache = normalizeJournalCache(raw, config().url, current.userId);
+      cacheMemo = { key, cache };
+    }
     return verified && cache.verifiedDeadline !== current.deadline ? null : cache;
   }
   function journalSession(): Session {
@@ -80,40 +91,43 @@ export function createClient(options: ClientOptions = {}) {
     const current = storedSession();
     if (authGeneration !== generation || !current || current.deadline !== deadline || current.userId !== owner || current.deadline <= now()) throw new Error('Your session has ended. Sign in again.');
   }
-  function putJournal(cache: JournalCache, owner: string, deadline: number, generation: number): JournalCache {
+  async function putJournal(cache: JournalCache, owner: string, deadline: number, generation: number): Promise<JournalCache> {
     assertJournalSession(owner, deadline, generation);
-    if (!local) throw new Error('Browser storage is unavailable. Your changes cannot be kept safely.');
+    if (!store) throw new Error('Browser storage is unavailable. Your changes cannot be kept safely.');
     const localVersion = globalThis.crypto?.randomUUID?.() ?? `${now()}-${Math.random().toString(36).slice(2)}`;
     const next = normalizeJournalCache({ ...cache, localVersion }, config().url, owner);
-    try { local.setItem(journalCacheKey(config().url, owner), JSON.stringify(next)); }
+    const key = journalCacheKey(config().url, owner);
+    cacheMemo = null;
+    try { await store.set([[key, next], [versionKey(key), localVersion]]); }
     catch { throw new Error('This device could not keep the journal changes. Free some browser storage and try again before closing this page.'); }
+    assertJournalSession(owner, deadline, generation);
+    cacheMemo = { key, cache: next };
     return next;
   }
   function presentJournal(cache: JournalCache, offline = journalOffline): JournalSnapshot {
+    // One validated copy serves as both the merge base for this version and the snapshot shown; neither is mutated.
     const data = normalizeData(cache.working);
     observedJournals.set(cache.localVersion, data);
     if (observedJournals.size > 32) observedJournals.delete(observedJournals.keys().next().value!);
     lastJournalVersion = cache.localVersion;
-    return { data: normalizeData(data), pending: !journalEqual(cache.baseline.data, data) || Boolean(cache.attempted?.length), offline, conflict: cache.conflict, localVersion: cache.localVersion };
+    return { data, pending: !journalEqual(cache.baseline.data, data) || Boolean(cache.attempted?.length), offline, conflict: cache.conflict, localVersion: cache.localVersion };
   }
-  function cachedGarmin(): GarminSnapshot | null {
-    if (!configuration) return null;
+  async function cachedGarmin(): Promise<GarminSnapshot | null> {
+    if (!configuration || !store) return null;
     const current = storedSession();
-    if (!current || current.deadline <= now() || !cacheFor(current)) return null;
-    const encoded = local?.getItem(`calories.garmin.v1:${config().url}:${current.userId}`);
-    if (!encoded) return null;
+    if (!current || current.deadline <= now() || !(await cacheFor(current))) return null;
     try {
-      const value = JSON.parse(encoded);
-      return value.deadline === current.deadline ? normalizeGarminSnapshot(value.snapshot) : null;
+      const value = await store.get(garminKey(current.userId)) as { deadline?: number; snapshot?: unknown } | undefined;
+      return value?.deadline === current.deadline ? normalizeGarminSnapshot(value.snapshot) : null;
     } catch { return null; }
   }
   function clearSession() {
     authGeneration += 1;
     if (configuration) { local?.removeItem(sessionKey()); tab?.removeItem(sessionKey()); }
     session = null;
-    revision = undefined;
     lastJournalVersion = undefined;
     observedJournals.clear();
+    cacheMemo = null;
   }
   function storedSession(): Session | null {
     const encoded = tab?.getItem(sessionKey()) || local?.getItem(sessionKey());
@@ -227,7 +241,20 @@ export function createClient(options: ClientOptions = {}) {
     return response;
   }
 
-  async function readCloudJournal(): Promise<{ data: TrackerData; revision: number | null }> {
+  async function storageRows(response: Response): Promise<any[]> {
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) clearSession();
+      if (response.status >= 500 || response.status === 429) throw new RecoverableNetworkError();
+      throw await errorFor(response);
+    }
+    const rows = await readStorageJson(response);
+    if (!Array.isArray(rows) || rows.length > 1) throw new Error('The storage response was invalid.');
+    if (rows.length && (!Number.isSafeInteger(rows[0].revision) || rows[0].revision < 1)) throw new Error('The storage revision was invalid.');
+    return rows;
+  }
+  /** The saved journal. When `known` is the copy this device last read or wrote, only the revision
+   * is fetched first, and the journal itself is downloaded only if another device has saved since. */
+  async function readCloudJournal(known?: { data: TrackerData; revision: number | null }): Promise<{ data: TrackerData; revision: number | null }> {
     const current = await ensureSession();
     const access = await authenticated('/rest/v1/rpc/calories_access_allowed', { method: 'POST', body: '{}' });
     if (!access.ok) {
@@ -236,16 +263,13 @@ export function createClient(options: ClientOptions = {}) {
       throw await errorFor(access);
     }
     if (await readStorageJson(access) !== true) { clearSession(); throw new Error('This account does not have access, or its 30-day session has expired. Sign in again with the owner account.'); }
-    const response = await authenticated(`/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}&select=data,revision`);
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) clearSession();
-      if (response.status >= 500 || response.status === 429) throw new RecoverableNetworkError();
-      throw await errorFor(response);
+    const row = `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}`;
+    if (known?.revision) {
+      const rows = await storageRows(await authenticated(`${row}&select=revision`));
+      if (rows.length && rows[0].revision === known.revision) return known;
     }
-    const rows = await readStorageJson(response);
-    if (!Array.isArray(rows) || rows.length > 1) throw new Error('The storage response was invalid.');
+    const rows = await storageRows(await authenticated(`${row}&select=data,revision`));
     if (!rows.length) return { data: emptyData(), revision: null };
-    if (!Number.isSafeInteger(rows[0].revision) || rows[0].revision < 1) throw new Error('The storage revision was invalid.');
     return { data: normalizeData(rows[0].data), revision: rows[0].revision };
   }
   async function syncJournal(): Promise<JournalSnapshot> {
@@ -257,11 +281,15 @@ export function createClient(options: ClientOptions = {}) {
       try {
         // Drain a bounded number of edits made while a previous request was in flight.
         for (let pass = 0; pass < 4; pass++) {
-          const cloud = await readCloudJournal();
+          const known = await cacheFor(journalSession());
+          // With only plain local edits on top of the last saved copy, write first: the conditional
+          // write matches no row if another device saved since, and the next pass reads and merges.
+          const writeFirst = pass === 0 && known !== null && !known.conflict && !known.attempted?.length && known.baseline.revision !== null && !journalEqual(known.working, known.baseline.data);
+          const cloud = writeFirst ? known.baseline : await readCloudJournal(known?.baseline);
           assertJournalSession(owner, deadline, generation);
-          journalOffline = false;
-          const staged = await withJournalLock(`calories-journal-local:${scope}`, () => {
-            const previous = cacheFor(journalSession(), false);
+          if (!writeFirst) journalOffline = false;
+          const staged = await withJournalLock(`calories-journal-local:${scope}`, async () => {
+            const previous = await cacheFor(journalSession(), false);
             let working = cloud.data;
             try {
               if (previous) {
@@ -282,7 +310,7 @@ export function createClient(options: ClientOptions = {}) {
               }
             } catch (error) {
               if (!(error instanceof JournalConflictError) || !previous) throw error;
-              return { cache: putJournal({ ...previous, verifiedDeadline: deadline, conflict: error.message }, owner, deadline, generation), write: false };
+              return { cache: await putJournal({ ...previous, verifiedDeadline: deadline, conflict: error.message }, owner, deadline, generation), write: false };
             }
             const attempted = (previous?.attempted ?? []).filter(attempt => attempt.revision === cloud.revision);
             let cache: JournalCache = { format: 1, project: config().url, owner, verifiedDeadline: deadline, baseline: cloud, working, localVersion: '', conflict: null, ...(attempted.length ? { attempted } : {}) };
@@ -294,11 +322,11 @@ export function createClient(options: ClientOptions = {}) {
               if (attempted.length >= 20) throw new Error('Several saves could not be confirmed. Your local changes are kept; reconnect on a stable connection before syncing again.');
               cache.attempted = [...attempted, { data: working, revision: cloud.revision }];
             } else delete cache.attempted;
-            cache = putJournal(cache, owner, deadline, generation);
+            // An unchanged cache needs no rewrite.
+            cache = !write && previous && previous.verifiedDeadline === deadline && !previous.conflict && !previous.attempted?.length && previous.baseline.revision === cloud.revision && journalEqual(previous.baseline.data, cloud.data) && journalEqual(previous.working, working)
+              ? previous : await putJournal(cache, owner, deadline, generation);
             return { cache, write };
           });
-          revision = cloud.revision;
-          needsReload = false;
           if (!staged.write) return presentJournal(staged.cache);
           const first = cloud.revision === null;
           // Only the new revision is read back; echoing the whole journal would double each save's download.
@@ -313,24 +341,24 @@ export function createClient(options: ClientOptions = {}) {
           }
           const rows = await readStorageJson(response);
           if (!Array.isArray(rows) || rows.length !== 1 || !Number.isSafeInteger(rows[0].revision) || rows[0].revision <= (cloud.revision ?? 0)) continue;
+          journalOffline = false;
           const savedRevision = rows[0].revision as number;
-          const saved = await withJournalLock(`calories-journal-local:${scope}`, () => {
-            const latest = cacheFor(journalSession());
+          const saved = await withJournalLock(`calories-journal-local:${scope}`, async () => {
+            const latest = await cacheFor(journalSession());
             if (!latest) throw new Error('The local journal is no longer available. Sign in again.');
             const next = { ...latest, baseline: { data: staged.cache.working, revision: savedRevision }, conflict: null };
             delete next.attempted;
             return putJournal(next, owner, deadline, generation);
           });
-          revision = savedRevision;
           const result = presentJournal(saved);
           if (!result.pending) return result;
         }
-        const latest = cacheFor(journalSession());
+        const latest = await cacheFor(journalSession());
         if (!latest) throw new Error('Reload your journal before syncing.');
         return presentJournal(latest);
       } catch (error) {
         assertJournalSession(owner, deadline, generation);
-        const cached = cacheFor(journalSession());
+        const cached = await cacheFor(journalSession());
         if (isRecoverableNetworkError(error) && cached) { journalOffline = true; return presentJournal(cached, true); }
         throw error;
       }
@@ -342,11 +370,11 @@ export function createClient(options: ClientOptions = {}) {
     get configured() { return Boolean(configuration); },
     getEmail() { return session?.email || configuration?.email || ''; },
     getJournalScope: journalScope,
-    getJournalSnapshot(): JournalSnapshot | null {
+    async getJournalSnapshot(): Promise<JournalSnapshot | null> {
       if (!configuration) return null;
       const current = storedSession();
       if (!current || current.deadline <= now()) return null;
-      const cached = cacheFor(current);
+      const cached = await cacheFor(current);
       return cached ? presentJournal(cached) : null;
     },
     getCachedGarmin: cachedGarmin,
@@ -359,29 +387,29 @@ export function createClient(options: ClientOptions = {}) {
       const version = expectedLocalVersion ?? lastJournalVersion;
       const observed = version ? observedJournals.get(version) : undefined;
       if (!observed) throw new Error('Open your journal before making changes. Your local form is still available.');
-      return withJournalLock(`calories-journal-local:${scope}`, () => {
+      return withJournalLock(`calories-journal-local:${scope}`, async () => {
         assertJournalSession(current.userId, current.deadline, generation);
-        const cached = cacheFor(current);
+        const cached = await cacheFor(current);
         if (!cached) throw new Error('Open your saved journal online once before making offline changes.');
         const working = mergeJournals(observed, data, cached.working);
-        const next = putJournal({ ...cached, working, conflict: null }, current.userId, current.deadline, generation);
+        const next = await putJournal({ ...cached, working, conflict: null }, current.userId, current.deadline, generation);
         return presentJournal(next);
       });
     },
     async discardJournalChanges(): Promise<JournalSnapshot> {
       const current = journalSession(), generation = authGeneration;
       const scope = `${config().url}:${current.userId}`;
-      const previousVersion = cacheFor(current, false)?.localVersion;
+      const previousVersion = (await cacheFor(current, false))?.localVersion;
       return withJournalLock(`calories-journal-sync:${scope}`, async () => {
         const cloud = await readCloudJournal(); // Never discard anything before a successful online read.
-        const next = await withJournalLock(`calories-journal-local:${scope}`, () => {
-          if (cacheFor(journalSession(), false)?.localVersion !== previousVersion) throw new JournalConflictError('the local journal while saved data was being reloaded');
+        const next = await withJournalLock(`calories-journal-local:${scope}`, async () => {
+          if ((await cacheFor(journalSession(), false))?.localVersion !== previousVersion) throw new JournalConflictError('the local journal while saved data was being reloaded');
           return putJournal({
           format: 1, project: config().url, owner: current.userId, verifiedDeadline: current.deadline,
           baseline: cloud, working: cloud.data, localVersion: '', conflict: null,
           }, current.userId, current.deadline, generation);
         });
-        journalOffline = false; revision = cloud.revision; needsReload = false;
+        journalOffline = false;
         return presentJournal(next);
       });
     },
@@ -390,14 +418,12 @@ export function createClient(options: ClientOptions = {}) {
       clearSession();
       configuration = next;
       local?.setItem(CONFIG_KEY, JSON.stringify(next));
-      needsReload = false;
     },
     async signIn(email: string, password: string, remember: boolean) {
       clearSession();
       const generation = authGeneration;
       const response = await http('/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
       await acceptAuth(response, remember, now() + REMEMBER_MS, () => generation === authGeneration);
-      needsReload = false;
     },
     async restoreSession(): Promise<boolean> {
       if (!configuration) return false;
@@ -407,20 +433,20 @@ export function createClient(options: ClientOptions = {}) {
       try { response = await authenticated('/auth/v1/user'); }
       catch (error) {
         const current = storedSession();
-        if (isRecoverableNetworkError(error) && current && current.deadline > now() && cacheFor(current)) { journalOffline = true; return true; }
+        if (isRecoverableNetworkError(error) && current && current.deadline > now() && await cacheFor(current)) { journalOffline = true; return true; }
         throw error;
       }
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) { clearSession(); return false; }
         const current = storedSession();
-        if ((response.status >= 500 || response.status === 429) && current && current.deadline > now() && cacheFor(current)) { journalOffline = true; return true; }
+        if ((response.status >= 500 || response.status === 429) && current && current.deadline > now() && await cacheFor(current)) { journalOffline = true; return true; }
         throw await errorFor(response);
       }
       let user;
       try { user = await readStorageJson(response); }
       catch (error) {
         const current = storedSession();
-        if (isRecoverableNetworkError(error) && current && current.deadline > now() && cacheFor(current)) { journalOffline = true; return true; }
+        if (isRecoverableNetworkError(error) && current && current.deadline > now() && await cacheFor(current)) { journalOffline = true; return true; }
         throw error;
       }
       if (user.id !== session?.userId || !storedSession() || session.deadline <= now()) { clearSession(); return false; }
@@ -430,11 +456,11 @@ export function createClient(options: ClientOptions = {}) {
       const current = storedSession();
       clearSession();
       journalOffline = false;
-      needsReload = false;
       if (current && configuration) {
-        await withJournalLock(`calories-journal-local:${config().url}:${current.userId}`, () => {
-          local?.removeItem(journalCacheKey(config().url, current.userId));
-          local?.removeItem(`calories.garmin.v1:${config().url}:${current.userId}`);
+        await withJournalLock(`calories-journal-local:${config().url}:${current.userId}`, async () => {
+          const key = journalCacheKey(config().url, current.userId);
+          cacheMemo = null;
+          await store?.remove([key, versionKey(key), garminKey(current.userId)]);
         });
       }
       try {
@@ -444,21 +470,6 @@ export function createClient(options: ClientOptions = {}) {
         }
       } catch { return 'Signed out on this device. The server could not be reached to revoke the session.'; }
       return undefined;
-    },
-    async load(): Promise<TrackerData> {
-      const current = await ensureSession();
-      const access = await authenticated('/rest/v1/rpc/calories_access_allowed', { method: 'POST', body: '{}' });
-      if (!access.ok) throw await errorFor(access);
-      if (await readStorageJson(access) !== true) throw new Error('This account does not have access, or its 30-day session has expired. Sign in again with the owner account.');
-      const response = await authenticated(`/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}&select=data,revision`);
-      if (!response.ok) throw await errorFor(response);
-      const rows = await readStorageJson(response);
-      if (!Array.isArray(rows)) throw new Error('The storage response was invalid.');
-      if (rows.length === 0) { revision = null; needsReload = false; return emptyData(); }
-      const data = normalizeData(rows[0].data);
-      revision = rows[0].revision;
-      needsReload = false;
-      return data;
     },
     async disconnectGarmin(): Promise<void> {
       const response = await authenticated('/rest/v1/rpc/calories_garmin_disconnect', { method: 'POST', body: '{}' });
@@ -492,9 +503,13 @@ export function createClient(options: ClientOptions = {}) {
         return normalizeMealPhotoDraft(draft);
       }, signal);
     },
-    async loadGarmin(): Promise<GarminSnapshot> {
+    /** With `changedOnly`, fetches just the days imported since the saved copy and merges them in;
+     * imports only ever add or update days, so nothing can be missed. */
+    async loadGarmin({ changedOnly = false }: { changedOnly?: boolean } = {}): Promise<GarminSnapshot> {
       try {
       const current = await ensureSession();
+      const saved = changedOnly ? await cachedGarmin() : null;
+      const since = saved?.days.reduce<string | null>((latest, day) => latest === null || Date.parse(day.synced_at) > Date.parse(latest) ? day.synced_at : latest, null) ?? null;
       const access = await authenticated('/rest/v1/rpc/calories_access_allowed', { method: 'POST', body: '{}' });
       if (!access.ok) {
         if (access.status >= 500 || access.status === 429) throw new RecoverableNetworkError();
@@ -505,7 +520,8 @@ export function createClient(options: ClientOptions = {}) {
       const days: unknown[] = [];
       // PostgREST caps a response at 1,000 rows. Page through older journal dates too.
       for (let offset = 0; offset < 100000; offset += 1000) {
-        const response = await authenticated(`/rest/v1/calories_garmin_days?owner_id=eq.${owner}&select=date,active,resting,total,synced_at&order=date.desc&limit=1000&offset=${offset}`);
+        const changed = since ? `&synced_at=gte.${encodeURIComponent(since)}` : '';
+        const response = await authenticated(`/rest/v1/calories_garmin_days?owner_id=eq.${owner}${changed}&select=date,active,resting,total,synced_at&order=date.desc&limit=1000&offset=${offset}`);
         if (!response.ok) {
           if (response.status >= 500 || response.status === 429) throw new RecoverableNetworkError();
           throw await errorFor(response);
@@ -523,41 +539,22 @@ export function createClient(options: ClientOptions = {}) {
       }
       const rows = await readStorageJson(response);
       if (!Array.isArray(rows) || rows.length !== 1) throw new Error('Garmin storage setup is incomplete, or access has expired.');
-      const snapshot = normalizeGarminSnapshot({ days, status: rows[0] });
+      let merged = days;
+      if (saved && since) {
+        const byDate = new Map<string, unknown>(saved.days.map(day => [day.date, day]));
+        for (const day of days) byDate.set(String((day as { date?: unknown } | null)?.date), day);
+        merged = [...byDate.values()];
+      }
+      const snapshot = normalizeGarminSnapshot({ days: merged, status: rows[0] });
       try {
         const stillCurrent = storedSession();
-        if (stillCurrent && stillCurrent.userId === current.userId && stillCurrent.deadline === current.deadline && current.deadline > now()) local?.setItem(`calories.garmin.v1:${config().url}:${current.userId}`, JSON.stringify({ deadline: current.deadline, snapshot }));
+        if (stillCurrent && stillCurrent.userId === current.userId && stillCurrent.deadline === current.deadline && current.deadline > now()) await store?.set([[garminKey(current.userId), { deadline: current.deadline, snapshot }]]);
       } catch { /* A full auxiliary cache must not discard a successful cloud read. */ }
       return snapshot;
       } catch (error) {
-        if (isRecoverableNetworkError(error)) { const cached = cachedGarmin(); if (cached) return cached; }
+        if (isRecoverableNetworkError(error)) { const cached = await cachedGarmin(); if (cached) return cached; }
         throw error;
       }
-    },
-    async save(value: TrackerData): Promise<void> {
-      const data = normalizeData(value);
-      if (revision === undefined || needsReload) throw new Error('Reload your saved data before making more changes. You can export your unsaved changes first.');
-      if (saving) throw new Error('A save is already in progress. Wait for it to finish.');
-      saving = true;
-      try {
-        const current = await ensureSession();
-        const first = revision === null;
-        const path = first ? '/rest/v1/calories_state?select=revision' : `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}&revision=eq.${revision}&select=revision`;
-        const response = await authenticated(path, { method: first ? 'POST' : 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(first ? { user_id: current.userId, data } : { data }) });
-        if (!response.ok) {
-          // A request may have reached the server even if its response was lost.
-          needsReload = true;
-          if (response.status === 409) throw new Error('Another device saved changes first. Export any unsaved changes, then reload to see the latest data.');
-          throw await errorFor(response);
-        }
-        const rows = await readStorageJson(response);
-        if (!Array.isArray(rows) || rows.length !== 1 || typeof rows[0].revision !== 'number') {
-          needsReload = true;
-          throw new Error('Another device saved changes first, or access expired. Export any unsaved changes, then reload your saved data.');
-        }
-        revision = rows[0].revision;
-      } catch (error) { needsReload = true; throw error; }
-      finally { saving = false; }
     },
   };
 }

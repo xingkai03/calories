@@ -77,7 +77,7 @@ test('remembered sign-in expires at its original 30-day deadline despite token r
   const requestsBeforeExpiry = h.calls.length;
   h.setTime(deadline);
   assert.equal(await h.client.restoreSession(), false);
-  await assert.rejects(h.client.load(), /session has ended/);
+  await assert.rejects(h.client.openJournal(), /session has ended/);
   assert.equal(h.calls.length, requestsBeforeExpiry, 'an expired device must not send or refresh credentials');
   assert.equal(sessionIn(h.localStorage), undefined);
 });
@@ -124,84 +124,13 @@ test('concurrent reads rotate an expiring refresh token once', async () => {
       return json(auth('rotated'));
     }
     assert.equal(call.headers.get('Authorization'), 'Bearer access-rotated');
-    return json([{ data: emptyData(), revision: 1 }]);
+    if (call.address.pathname === '/rest/v1/calories_garmin_status') return json([{ state: 'not_connected', last_attempt_at: null, last_sync_at: null, last_error_code: null }]);
+    return json([]);
   });
   await h.client.signIn('owner@example.com', 'password-value', true);
   h.setTime(start + 3600 * 1000);
-  await Promise.all([h.client.load(), h.client.load()]);
+  await Promise.all([h.client.loadGarmin(), h.client.loadGarmin()]);
   assert.equal(refreshes, 1);
-});
-
-test('stale revisions block subsequent overwrites until data is reloaded', async () => {
-  let loads = 0;
-  let patches = 0;
-  const h = harness(call => {
-    assert.equal(call.address.pathname, '/rest/v1/calories_state');
-    if (call.method === 'GET') return json([{ data: emptyData(), revision: ++loads === 1 ? 7 : 8 }]);
-    assert.equal(call.method, 'PATCH');
-    assert.deepEqual(Object.keys(call.body), ['data']);
-    patches++;
-    assert.equal(call.address.searchParams.get('revision'), patches === 1 ? 'eq.7' : 'eq.8');
-    assert.equal(call.address.searchParams.get('user_id'), `eq.${userId}`);
-    return json(patches === 1 ? [] : [{ revision: 9 }]);
-  });
-  await h.client.signIn('owner@example.com', 'password-value', true);
-  await h.client.load();
-  await assert.rejects(h.client.save(emptyData()), /Another device saved changes first/);
-  const callsAtConflict = h.calls.length;
-  await assert.rejects(h.client.save(emptyData()), /Reload your saved data/);
-  assert.equal(h.calls.length, callsAtConflict);
-  await h.client.load();
-  await h.client.save(emptyData());
-  assert.equal(patches, 2);
-});
-
-test('a first save requires a successful load and inserts only the authenticated user row', async () => {
-  const h = harness(call => {
-    if (call.method === 'GET') return json([]);
-    assert.equal(call.method, 'POST');
-    assert.deepEqual(call.body, { user_id: userId, data: emptyData() });
-    return json([{ revision: 1 }], 201);
-  });
-  await h.client.signIn('owner@example.com', 'password-value', true);
-  await assert.rejects(h.client.save(emptyData()), /Reload your saved data/);
-  await h.client.load();
-  await h.client.save(emptyData());
-});
-
-test('uncertain save failures require reload before retrying to avoid overwriting a completed request', async () => {
-  const h = harness(call => {
-    if (call.method === 'GET') return json([{ data: emptyData(), revision: 1 }]);
-    throw new Error('The response was lost after the write reached the server');
-  });
-  await h.client.signIn('owner@example.com', 'password-value', true);
-  await h.client.load();
-  await assert.rejects(h.client.save(emptyData()), /Cannot reach your storage/);
-  const beforeRetry = h.calls.length;
-  await assert.rejects(h.client.save(emptyData()), /Reload your saved data/);
-  assert.equal(h.calls.length, beforeRetry);
-});
-
-test('concurrent saves are rejected before sending a second request', async () => {
-  let release;
-  let writes = 0;
-  const pending = new Promise(resolve => { release = resolve; });
-  const h = harness(call => {
-    if (call.method === 'GET') return json([{ data: emptyData(), revision: 1 }]);
-    writes++;
-    return writes === 1 ? pending : json([{ revision: 2 }]);
-  });
-  await h.client.signIn('owner@example.com', 'password-value', true);
-  await h.client.load();
-  const first = h.client.save(emptyData());
-  const second = h.client.save(emptyData()).then(() => ({ ok: true }), error => ({ ok: false, error }));
-  await new Promise(resolve => setImmediate(resolve));
-  release(json([{ revision: 2 }]));
-  await first;
-  const outcome = await second;
-  assert.equal(outcome.ok, false);
-  assert.match(outcome.error.message, /save is already in progress/);
-  assert.equal(writes, 1);
 });
 
 test('sign-out clears both storage scopes even when remote revocation fails', async () => {
@@ -296,7 +225,7 @@ test('Garmin reads use owner/session access and leave journal revision unchanged
   const status = { state: 'connected', last_attempt_at: reading.synced_at, last_sync_at: reading.synced_at, last_error_code: null };
   const h = harness(call => {
     if (call.address.pathname === '/rest/v1/calories_state') {
-      if (call.method === 'GET') return json([{ data: emptyData(), revision: 7 }]);
+      if (call.method === 'GET') return json(call.address.searchParams.get('select') === 'revision' ? [{ revision: 7 }] : [{ data: emptyData(), revision: 7 }]);
       assert.equal(call.address.searchParams.get('revision'), 'eq.7');
       return json([{ revision: 8 }]);
     }
@@ -307,9 +236,10 @@ test('Garmin reads use owner/session access and leave journal revision unchanged
     throw new Error('Unexpected request');
   });
   await h.client.signIn('owner@example.com', 'password-value', true);
-  await h.client.load();
+  const journal = await h.client.openJournal();
   assert.deepEqual(await h.client.loadGarmin(), { days: [reading], status });
-  await h.client.save(emptyData());
+  await h.client.stageJournal({ ...journal.data, defaults: { ...journal.data.defaults, deficit: 400 } }, journal.localVersion);
+  assert.equal((await h.client.syncJournal()).pending, false);
 });
 
 test('Garmin denied/expired access does not look like an empty disconnected account', async () => {

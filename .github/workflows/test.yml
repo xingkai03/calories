@@ -1,0 +1,27 @@
+name: Test
+
+# Deploys run the tests on main; this checks pull requests before they are merged.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Run tests and build
+        run: |
+          npm ci
+          npm test
+          npm run build

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { addDays, dayTotals, emptyData, foodListPreferences, normalizeData, settingsForDay, todayISO, FOOD_SORTS, FOOD_WINDOWS, type Entry, type Food, type FoodListPreferences, type FoodSort, type FoodWindow, type TrackerData, type BankPortion } from '../../lib/calories/model';
+import { addDays, dayTotals, emptyData, isCalendarDate, foodListPreferences, normalizeData, settingsForDay, todayISO, FOOD_SORTS, FOOD_WINDOWS, type Entry, type Food, type FoodListPreferences, type FoodSort, type FoodWindow, type TrackerData, type BankPortion } from '../../lib/calories/model';
 import { createClient, isRecoverableNetworkError, type JournalSnapshot } from '../../lib/calories/client';
 import { effectiveBurned, emptyGarminSnapshot, type GarminSnapshot } from '../../lib/calories/garmin';
 import { DAILY_PROTEIN_GRAMS, macroTargets, nutrientProgress } from '../../lib/calories/nutrition';
@@ -42,7 +42,7 @@ function locationState(): { view: View; date: string | null } {
   const rawView = params.get('view');
   const view = rawView ? LEGACY_VIEWS[rawView] ?? rawView as View : null;
   const date = params.get('date');
-  return { view: view && VIEWS.includes(view) ? view : 'journal', date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) ? date : null };
+  return { view: view && VIEWS.includes(view) ? view : 'journal', date: date && isCalendarDate(date) ? date : null };
 }
 function urlFor(view: View, date: string, currentDay: string): string {
   const params = new URLSearchParams();

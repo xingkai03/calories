@@ -301,7 +301,8 @@ export function createClient(options: ClientOptions = {}) {
           needsReload = false;
           if (!staged.write) return presentJournal(staged.cache);
           const first = cloud.revision === null;
-          const path = first ? '/rest/v1/calories_state' : `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(owner)}&revision=eq.${cloud.revision}`;
+          // Only the new revision is read back; echoing the whole journal would double each save's download.
+          const path = first ? '/rest/v1/calories_state?select=revision' : `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(owner)}&revision=eq.${cloud.revision}&select=revision`;
           const response = await authenticated(path, { method: first ? 'POST' : 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(first ? { user_id: owner, data: staged.cache.working } : { data: staged.cache.working }) });
           assertJournalSession(owner, deadline, generation);
           if (!response.ok) {
@@ -541,7 +542,7 @@ export function createClient(options: ClientOptions = {}) {
       try {
         const current = await ensureSession();
         const first = revision === null;
-        const path = first ? '/rest/v1/calories_state' : `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}&revision=eq.${revision}`;
+        const path = first ? '/rest/v1/calories_state?select=revision' : `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}&revision=eq.${revision}&select=revision`;
         const response = await authenticated(path, { method: first ? 'POST' : 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(first ? { user_id: current.userId, data } : { data }) });
         if (!response.ok) {
           // A request may have reached the server even if its response was lost.

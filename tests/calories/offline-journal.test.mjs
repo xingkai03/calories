@@ -46,7 +46,7 @@ function harness(initial = emptyData()) {
       if (state.holdRead) await state.holdRead;
       return json(state.revision === null ? [] : [{ data: state.data, revision: state.revision }]);
     }
-    state.writes++;
+    state.writes++; state.writeSelect = endpoint.searchParams.get('select');
     if (state.holdWrite) await state.holdWrite;
     if (state.revision === null) {
       assert.equal(init.method, 'POST'); assert.equal(body.user_id, owner);
@@ -307,4 +307,18 @@ test('food list settings merge like other records and conflict only when both de
   assert.deepEqual(mergeJournals(base, byName, base).preferences, byName.preferences);
   assert.deepEqual(mergeJournals(base, base, recent).preferences, recent.preferences);
   assert.throws(() => mergeJournals(base, byName, recent), JournalConflictError);
+});
+
+test('a save reads back only the new revision, not the whole journal', async () => {
+  const first = harness(); first.state.revision = null;
+  const opened = await open(first);
+  await first.client.stageJournal(append(opened.data, meal('first')), opened.localVersion);
+  await first.client.syncJournal();
+  assert.equal(first.state.writeSelect, 'revision');
+  const h = harness(); const snapshot = await open(h);
+  await h.client.stageJournal(append(snapshot.data, meal('later')), snapshot.localVersion);
+  const synced = await h.client.syncJournal();
+  assert.equal(h.state.writeSelect, 'revision');
+  assert.equal(synced.pending, false);
+  assert.deepEqual(synced.data.entries, [meal('later')]);
 });

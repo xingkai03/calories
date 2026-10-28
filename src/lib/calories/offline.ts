@@ -32,17 +32,32 @@ export class RecoverableNetworkError extends Error {
 }
 export function isRecoverableNetworkError(error: unknown): error is RecoverableNetworkError { return error instanceof RecoverableNetworkError; }
 
-function stable(value: unknown): string {
-  if (Array.isArray(value)) {
-    // Journal collections are identified by stable IDs; their visual order is not an edit.
-    const rows = value.every(item => item && typeof item === 'object' && typeof item.id === 'string')
-      ? [...value].sort((a, b) => a.id.localeCompare(b.id)) : value;
-    return `[${rows.map(stable).join(',')}]`;
+type IdRecord = { id: string };
+const isRecordList = (rows: unknown[]): rows is IdRecord[] => rows.every(item => item && typeof item === 'object' && typeof (item as IdRecord).id === 'string');
+const byId = (a: IdRecord, b: IdRecord) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+/** Structural equality where key order and the order of records within an ID'd collection
+ * (their visual order) are not edits. Compares in place, without serializing whole journals,
+ * because it runs over every record on each save. */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    const keyed = isRecordList(a);
+    if (keyed !== isRecordList(b)) return false;
+    if (!keyed || a.every((row, index) => row.id === (b[index] as IdRecord).id)) return a.every((row, index) => same(row, b[index]));
+    const left = [...a].sort(byId), right = [...(b as IdRecord[])].sort(byId);
+    return left.every((row, index) => same(row, right[index]));
   }
-  if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(',')}}`;
-  return JSON.stringify(value) ?? 'undefined';
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && same(left[key], right[key]));
+  }
+  if ((a && typeof a === 'object') || (b && typeof b === 'object')) return false;
+  // Primitives follow JSON, as stored: NaN and Infinity read back as null.
+  return (JSON.stringify(a) ?? 'undefined') === (JSON.stringify(b) ?? 'undefined');
 }
-export function journalEqual(a: unknown, b: unknown): boolean { return stable(a) === stable(b); }
+export function journalEqual(a: unknown, b: unknown): boolean { return same(a, b); }
 function choose<T>(base: T, local: T, remote: T, label: string, uncertain: readonly T[] = []): T {
   // A lost response may hide a committed write. If this record changed again
   // locally (including Undo), preserve that later intent rather than mistaking

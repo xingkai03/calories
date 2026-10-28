@@ -15,7 +15,7 @@ const PHOTO = {
 };
 const PHOTOS = { product: PHOTO, nutrition: PHOTO };
 const DRAFT = {
-  name: 'Beans', baseQuantity: 100, unit: 'g', state: 'As served',
+  name: 'Beans', baseQuantity: 100, unit: 'g', pieceWeight: null, state: 'As served',
   protein: 5, carbs: 12, fat: 0, fiber: null,
   estimatedFields: [], notes: [],
 };

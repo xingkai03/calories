@@ -182,6 +182,7 @@
 .cal-auth-card { width: 100%; max-width: 442px; padding: 35px 39px 29px; border: 1px solid #e0e5d7; border-radius: 22px; background: #fffefbf2; box-shadow: 0 15px 50px #40503606; }
 .cal-auth-card h1 { font-size: 33px; font-weight: 550; letter-spacing: -1.2px; line-height: 1.2; margin-top: 12px; }
 .cal-auth-intro { color: #919a86; font-size: 12px; line-height: 1.75; margin: 13px 0 25px !important; }
+.cal-auth-card h1 + form { margin-top: 25px; }
 .cal-form { display: flex; flex-direction: column; gap: 17px; }
 .cal-entry-mode-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; border: 1px solid #e1e6d7; border-radius: 11px; padding: 4px; background: #edf0e5; }
 .cal-entry-mode-switch > button { min-height: 44px; padding: 10px 12px; background: transparent; border: 0; border-radius: 8px; color: #5d6858; font-size: 12px; font-weight: 550; line-height: 1.4; }
@@ -201,9 +202,7 @@
 .cal-checkbox input { accent-color: var(--cal-green); width: 15px; height: 15px; margin: 2px 0 0; cursor: pointer; flex-shrink: 0; }
 .cal-checkbox > span { display: flex; flex-direction: column; gap: 3px; }
 .cal-checkbox small { font-size: 9px; color: #a5ad98; line-height: 1.5; }
-.cal-auth-footnote { margin-top: 24px; display: flex; justify-content: center; align-items: center; gap: 6px; color: #a1aa95; font-size: 9px; }
 .cal-auth-config { margin: 17px auto 0; display: flex; color: #98a48a !important; font-size: 9px; font-weight: 400; }
-.cal-auth-tagline { margin-top: 25px !important; color: #aab49b; font-size: 10px; }
 .cal-form-error { padding: 11px 13px; color: #a25849; background: #fbf0e9; border: 1px solid #efdcd0; border-radius: 8px; font-size: 11px; line-height: 1.6; }
 .cal-field-hint { font-size: 10px; line-height: 1.7; color: #a2aa95; font-weight: 400; }
 .cal-loading { text-align: center; padding-top: 47px; padding-bottom: 48px; }
@@ -400,7 +399,6 @@
   .cal-auth-card { padding: 29px 26px 26px; }
   .cal-auth-brand { margin-top: 34px; }
   .cal-auth-card h1 { font-size: 30px; }
-  .cal-auth-footnote { font-size: 8px; gap: 5px; }
   .cal-dialog { width: 100%; max-width: none; max-height: calc(100svh - 24px); margin: auto 0 0; border-radius: 21px 21px 0 0; border-bottom: 0; }
   .cal-modal-content { padding: 26px 24px max(24px, env(safe-area-inset-bottom)); }
   .cal-modal-heading h2 { font-size: 24px; }
@@ -433,11 +431,9 @@
   .cal-form input:not([type='checkbox']), .cal-form select, .cal-form textarea { font-size: 16px; }
   .cal-form-grid-three select { font-size: 14px; }
 }
-.cal-eyebrow, .cal-sync, .cal-page-heading p, .cal-energy-main p, .cal-energy-bottom > span, .cal-energy-bottom small, .cal-target-note, .cal-ring > div > small, .cal-pill, .cal-protein > div:first-child > span, .cal-protein strong small, .cal-protein p, .cal-macro-grid > div > span, .cal-macro-grid small, .cal-section-heading p, .cal-empty-journal p, .cal-meal-number, .cal-meal-heading > span:last-child, .cal-entry-info > span, .cal-entry-macros, .cal-entry-macros b, .cal-entry-energy small, .cal-library-bar > span, .cal-food-state, .cal-food-card > p, .cal-food-energy span, .cal-food-macros > span, .cal-food-footer p, .cal-history-header, .cal-history-row > span > small, .cal-home-link, .cal-auth-intro, .cal-checkbox small, .cal-auth-footnote, .cal-auth-tagline, .cal-field-hint, .cal-loading p, .cal-setup-note, .cal-modal-intro, .cal-unit-input > span, .cal-form-section-label p, .cal-entry-preview > div:first-child > span, .cal-entry-preview > div:first-child > strong small, .cal-preview-macros > span, .cal-entry-preview p, .cal-budget-preview > span, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p { color: #5d6858; }
+.cal-eyebrow, .cal-sync, .cal-page-heading p, .cal-energy-main p, .cal-energy-bottom > span, .cal-energy-bottom small, .cal-target-note, .cal-ring > div > small, .cal-pill, .cal-protein > div:first-child > span, .cal-protein strong small, .cal-protein p, .cal-macro-grid > div > span, .cal-macro-grid small, .cal-section-heading p, .cal-empty-journal p, .cal-meal-number, .cal-meal-heading > span:last-child, .cal-entry-info > span, .cal-entry-macros, .cal-entry-macros b, .cal-entry-energy small, .cal-library-bar > span, .cal-food-state, .cal-food-card > p, .cal-food-energy span, .cal-food-macros > span, .cal-food-footer p, .cal-history-header, .cal-history-row > span > small, .cal-home-link, .cal-auth-intro, .cal-checkbox small, .cal-field-hint, .cal-loading p, .cal-setup-note, .cal-modal-intro, .cal-unit-input > span, .cal-form-section-label p, .cal-entry-preview > div:first-child > span, .cal-entry-preview > div:first-child > strong small, .cal-preview-macros > span, .cal-entry-preview p, .cal-budget-preview > span, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p { color: #5d6858; }
 .cal-eyebrow, .cal-sync, .cal-energy-bottom > span, .cal-energy-bottom small, .cal-ring > div > small, .cal-pill, .cal-protein strong small, .cal-macro-grid > div > span, .cal-macro-grid small, .cal-meal-number, .cal-meal-heading > span:last-child, .cal-entry-macros, .cal-entry-macros b, .cal-entry-macros small, .cal-entry-energy small, .cal-food-state, .cal-food-energy span, .cal-food-macros > span, .cal-food-footer .cal-text-button, .cal-history-header, .cal-unit-input > span, .cal-preview-macros > span, .cal-entry-preview > div:first-child > strong small { font-size: 11px; }
-.cal-page-heading p, .cal-energy-main p, .cal-target-note, .cal-protein p, .cal-section-heading p, .cal-empty-journal p, .cal-entry-info > span, .cal-library-bar > span, .cal-food-card > p, .cal-food-macros strong, .cal-food-footer p, .cal-history-row > span > small, .cal-auth-intro, .cal-checkbox small, .cal-auth-footnote, .cal-auth-tagline, .cal-field-hint, .cal-setup-note, .cal-form-section-label p, .cal-entry-preview p, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p, .cal-import-confirm p { font-size: 12px; }
-.cal-auth-footnote { align-items: flex-start; line-height: 1.6; }
-.cal-auth-footnote svg { margin-top: 2px; }
+.cal-page-heading p, .cal-energy-main p, .cal-target-note, .cal-protein p, .cal-section-heading p, .cal-empty-journal p, .cal-entry-info > span, .cal-library-bar > span, .cal-food-card > p, .cal-food-macros strong, .cal-food-footer p, .cal-history-row > span > small, .cal-auth-intro, .cal-checkbox small, .cal-field-hint, .cal-setup-note, .cal-form-section-label p, .cal-entry-preview p, .cal-budget-preview p, .cal-transfer-option p, .cal-import-section > p, .cal-import-confirm p { font-size: 12px; }
 .cal-auth-config, .cal-add-food-inline, .cal-setup-guide strong, .cal-setup-guide a, .cal-form-error, .cal-save-alert p { font-size: 12px; }
 .cal-auth-config, .cal-home-link { color: #5d6858 !important; }
 .cal-entry-actions .cal-icon-button, .cal-food-heading .cal-icon-button, .cal-food-footer .cal-icon-button, .cal-history-row > svg { color: #5d6858; }

@@ -11,7 +11,7 @@ const photos = {
   nutrition: { mimeType: 'image/png', data: Buffer.from('\x89PNG\r\n\x1a\n', 'latin1').toString('base64') },
 };
 const draft = (overrides = {}) => ({
-  name: 'Example wholegrain oats', baseQuantity: 100, unit: 'g', state: 'As served',
+  name: 'Example wholegrain oats', baseQuantity: 100, unit: 'g', pieceWeight: null, state: 'As served',
   protein: 12.5, carbs: 60, fat: 7, fiber: 10, estimatedFields: [], notes: [],
   carbohydrateLabel: null, carbohydrateConvention: 'excludes_fiber', ...overrides,
 });
@@ -65,7 +65,7 @@ test('adapter makes one structured inline-image request to the fixed Google endp
   assert.equal(output.name, 'Example wholegrain oats');
   assert.equal(output.carbohydrateConvention, undefined);
   assert.equal(output.carbohydrateLabel, undefined);
-  assert.deepEqual(Object.keys(output).sort(), ['name', 'baseQuantity', 'unit', 'state', 'protein', 'carbs', 'fat', 'fiber', 'estimatedFields', 'notes'].sort());
+  assert.deepEqual(Object.keys(output).sort(), ['name', 'baseQuantity', 'unit', 'pieceWeight', 'state', 'protein', 'carbs', 'fat', 'fiber', 'estimatedFields', 'notes'].sort());
 });
 
 test('visible zero values and unresolved nulls survive without a zero fallback', async () => {
@@ -328,4 +328,9 @@ test('the provider timeout bounds an unresponsive fetch independently of network
   t.mock.timers.tick(FOOD_PHOTO_PROVIDER_TIMEOUT_MS);
   await rejection;
   t.mock.timers.reset();
+});
+
+test('a printed piece weight reaches the draft', async () => {
+  const output = await extractFoodPhotos(photos, options(draft({ pieceWeight: 12 })));
+  assert.equal(output.pieceWeight, 12);
 });

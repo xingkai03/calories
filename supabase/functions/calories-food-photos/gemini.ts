@@ -32,7 +32,7 @@ The first photo identifies the product; the second shows its nutrition label. Te
 
 Identify the food name from readable product text, including the brand/variant when clear. Never invent an unreadable product identity: use null. Keep the name at most 160 characters. If photos show different products, leave uncertain fields null and explain briefly.
 
-Choose ONE clearly readable nutrition column and use its exact quantity and unit for every nutrient. Prefer per 100 g or per 100 ml when available. Do not mix per-serving, per-pack and per-100 values. Package net weight is NOT the nutrition basis. A piece basis is valid only when the label explicitly provides nutrition for that number of pieces. Never guess a serving weight, piece weight or g/ml density. If the nutrition quantity or unit is unreadable or ambiguous, return null for the uncertain basis and ALL nutrient values; do not estimate the basis. State is Raw, Cooked or As served only when supported; otherwise null. Do not confuse as-prepared values with as-sold values.
+Choose ONE clearly readable nutrition column and use its exact quantity and unit for every nutrient. Prefer per 100 g or per 100 ml when available. Do not mix per-serving, per-pack and per-100 values. Package net weight is NOT the nutrition basis. A piece basis is valid only when the label explicitly provides nutrition for that number of pieces. Never guess a serving weight, piece weight or g/ml density. Set pieceWeight only when the label explicitly prints the weight of ONE piece, unit or serving, for example "1 biscuit = 12 g" or "per bar (40 g)" for a single bar: give it in grams, or in ml when the chosen basis is ml. Otherwise pieceWeight is null. If the nutrition quantity or unit is unreadable or ambiguous, return null for the uncertain basis and ALL nutrient values; do not estimate the basis. State is Raw, Cooked or As served only when supported; otherwise null. Do not confuse as-prepared values with as-sold values.
 
 Return protein, carbohydrate, TOTAL fat (not saturated fat), and dietary fibre in GRAMS per that chosen basis. Read decimal commas as decimals. Ignore percent daily values, reference-intake percentages, sugars, saturated fat and salt as substitutes for these four nutrients. A missing or unreadable value is null, not zero. An actual printed 0 remains 0. Preserve uncertain '<' or trace quantities as null with a review note instead of pretending they are exact.
 
@@ -51,6 +51,7 @@ const RESPONSE_SCHEMA = {
     name: nullable({ type: 'string', description: 'Readable product name, maximum 160 characters. Never invent an unreadable name.' }),
     baseQuantity: nullable({ type: 'number', minimum: 0.001, maximum: 1e8, description: 'The exact readable nutrition column quantity, not package net weight.' }),
     unit: nullable({ type: 'string', enum: ['g', 'ml', 'piece'] }),
+    pieceWeight: nullable({ type: 'number', minimum: 0.001, maximum: 1e8, description: 'Printed weight of one piece, unit or serving in grams (ml for a ml basis); null unless printed.' }),
     state: nullable({ type: 'string', enum: ['Raw', 'Cooked', 'As served'] }),
     protein: nutrientSchema('Printed grams of protein per the chosen basis; null if not readable. Never estimate.'),
     carbs: nutrientSchema('Carbohydrate grams as read, BEFORE any fibre subtraction.'),
@@ -61,7 +62,7 @@ const RESPONSE_SCHEMA = {
     carbohydrateLabel: nullable({ type: 'string', description: 'Exact printed carbohydrate row heading only, maximum 200 characters; null if unreadable. For example Hiilihydraatteja/Kolhydrat/Kulhydrat.' }),
     carbohydrateConvention: { type: 'string', enum: ['excludes_fiber', 'includes_fiber', 'unknown'] },
   },
-  required: ['name', 'baseQuantity', 'unit', 'state', 'protein', 'carbs', 'fat', 'fiber', 'estimatedFields', 'notes', 'carbohydrateLabel', 'carbohydrateConvention'],
+  required: ['name', 'baseQuantity', 'unit', 'pieceWeight', 'state', 'protein', 'carbs', 'fat', 'fiber', 'estimatedFields', 'notes', 'carbohydrateLabel', 'carbohydrateConvention'],
 };
 const RESPONSE_FIELDS = new Set(RESPONSE_SCHEMA.required);
 

@@ -10,7 +10,7 @@ const TOKEN = 'meal-owner-token';
 const API_KEY = 'private-meal-provider-key';
 const PHOTO = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS4kAAAAASUVORK5CYII=' };
 const MEAL = { name: 'Rice and chicken', protein: 25, carbs: 40, fat: 15, fiber: 3, notes: ['Portion size is an estimate.'] };
-const LABEL = { name: 'Beans', baseQuantity: 100, unit: 'g', state: 'As served', protein: 5, carbs: 12, fat: 0, fiber: 4, estimatedFields: [], notes: [] };
+const LABEL = { name: 'Beans', baseQuantity: 100, unit: 'g', pieceWeight: null, state: 'As served', protein: 5, carbs: 12, fat: 0, fiber: 4, estimatedFields: [], notes: [] };
 const payload = () => ({ mode: 'meal', photo: PHOTO, description: 'Lunch plate' });
 
 function upload(value = payload(), additionalHeaders = {}) {

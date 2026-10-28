@@ -10,6 +10,8 @@ export interface FoodPhotoDraft {
   name: string | null;
   baseQuantity: number | null;
   unit: 'g' | 'ml' | 'piece' | null;
+  /** Printed weight (g, or ml for a ml basis) of one piece or serving, so the food can be logged by the piece. */
+  pieceWeight: number | null;
   state: 'Raw' | 'Cooked' | 'As served' | null;
   protein: number | null;
   carbs: number | null;
@@ -44,6 +46,8 @@ export function normalizeFoodPhotoDraft(raw: unknown): FoodPhotoDraft {
     name: typeof value.name === 'string' ? value.name.trim() : null,
     baseQuantity: nullableNumber(value.baseQuantity, true),
     unit: nullableEnum(value.unit, ['g', 'ml', 'piece']),
+    // Photo readers deployed before piece weights existed leave it out.
+    pieceWeight: value.pieceWeight === undefined ? null : nullableNumber(value.pieceWeight, true),
     state: nullableEnum(value.state, ['Raw', 'Cooked', 'As served']),
     protein: nullableNumber(value.protein), carbs: nullableNumber(value.carbs),
     fat: nullableNumber(value.fat), fiber: nullableNumber(value.fiber),

@@ -1,14 +1,15 @@
-import { emptyData, energyFromMacros, macrosForFood, normalizeData, settingsForDay, type BankPortion, type Food, type TrackerData } from './model.ts';
+import { canLogPieces, emptyData, energyFromMacros, macrosForFood, normalizeData, quantityFromPieces, settingsForDay, type BankPortion, type Food, type TrackerData } from './model.ts';
 
 function positiveQuantity(value: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1e8) throw new Error('Enter a finite positive ingredient quantity.');
   return value;
 }
 
-/** Ingredient quantities describe one portion; batching makes independent snapshots. */
+/** Ingredient quantities describe one portion; batching makes independent snapshots.
+ * An ingredient given in `pieces` uses its food's piece weight, like a journal entry logged by the piece. */
 export function prepareFoodBankPortions(
   foods: readonly Food[],
-  ingredients: readonly { foodId: string; quantity: number }[],
+  ingredients: readonly { foodId: string; quantity?: number; pieces?: number }[],
   count: number,
   name: string,
   makeId: () => string,
@@ -22,9 +23,11 @@ export function prepareFoodBankPortions(
     if (!ingredient || typeof ingredient !== 'object' || Array.isArray(ingredient)) throw new Error('Invalid food-bank ingredient.');
     const food = library.get(ingredient.foodId);
     if (!food) throw new Error('Choose an existing food for each ingredient.');
-    const quantity = positiveQuantity(ingredient.quantity);
+    if (ingredient.pieces !== undefined && !canLogPieces(food)) throw new Error(`${food.name} has no piece weight. Enter its amount in ${food.unit}.`);
+    const pieces = ingredient.pieces === undefined ? undefined : positiveQuantity(ingredient.pieces);
+    const quantity = positiveQuantity(pieces === undefined ? ingredient.quantity as number : quantityFromPieces(food, pieces));
     const nutrients = macrosForFood(food, quantity);
-    return { foodId: food.id, foodName: food.name, quantity, unit: food.unit, state: food.state, ...nutrients, calories: energyFromMacros(nutrients) };
+    return { foodId: food.id, foodName: food.name, quantity, unit: food.unit, state: food.state, ...(pieces !== undefined ? { pieces } : {}), ...nutrients, calories: energyFromMacros(nutrients) };
   });
   const generatedIds = new Set<string>();
   const nextId = () => {

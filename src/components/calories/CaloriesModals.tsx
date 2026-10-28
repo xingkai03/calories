@@ -123,7 +123,7 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
     finally { setSubmitting(false); }
   }
   return <>
-    <ModalHeader title={entry ? 'Edit your entry' : 'What’s on the menu?'} eyebrow={entry ? 'DAILY JOURNAL' : 'LOG A FOOD'} onClose={closeEditor}/>
+    <ModalHeader title={entry ? 'Edit entry' : 'Log food'} eyebrow={entry ? 'DAILY JOURNAL' : 'LOG A FOOD'} onClose={closeEditor}/>
     <form className="cal-form" onSubmit={submit}>
       <DraftRestoredNotice {...form} disabled={photoBusy || submitting} discardDraft={() => { form.discardDraft(); setError(''); }}/>
       <div className={`cal-entry-mode-switch${!entry && bankCount ? ' cal-entry-mode-with-bank' : ''}`} role="group" aria-label="Entry method"><button type="button" disabled={submitting} className={mode === 'library' ? 'is-active' : ''} aria-pressed={mode === 'library'} onClick={() => changeMode('library')}>Food library</button><button type="button" disabled={submitting} className={mode === 'manual' ? 'is-active' : ''} aria-pressed={mode === 'manual'} onClick={() => changeMode('manual')}>Manual estimate</button>{!entry && bankCount > 0 && <button type="button" disabled={submitting} onClick={onFoodBank}>Food bank ({bankCount})</button>}</div>
@@ -167,6 +167,7 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
     const draft = normalizeFoodPhotoDraft(raw);
     setName(draft.name ?? ''); setBaseQuantity(draft.baseQuantity === null ? '' : String(draft.baseQuantity));
     setUnit(draft.unit ?? ''); setState(draft.state ?? 'As served');
+    if (draft.pieceWeight !== null) setPieceWeight(String(draft.pieceWeight));
     setNutrients({ protein: draft.protein === null ? '' : String(draft.protein), carbs: draft.carbs === null ? '' : String(draft.carbs), fat: draft.fat === null ? '' : String(draft.fat), fiber: draft.fiber === null ? '' : String(draft.fiber) });
     setImportedLabel(true); setError('');
   }
@@ -186,7 +187,7 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
     finally { setSubmitting(false); }
   }
   return <>
-    <ModalHeader title={food ? 'Edit a favourite' : 'Add an everyday food'} eyebrow="FOOD LIBRARY" onClose={closeEditor}/>
+    <ModalHeader title={food ? 'Edit food' : 'Add food'} eyebrow="FOOD LIBRARY" onClose={closeEditor}/>
     <form className="cal-form" onSubmit={submit}>
       <DraftRestoredNotice {...form} disabled={photoBusy || submitting} discardDraft={() => { form.discardDraft(); setError(''); }}/>
       {!food && <fieldset className="cal-food-editor-fields" disabled={submitting}><FoodPhotoImport readPhotos={readPhotos} onDraft={applyPhotos} onBusyChange={setPhotoBusy}/></fieldset>}
@@ -239,7 +240,7 @@ export function TargetsEditor({ date, currentDay, settings, defaultSettings, gar
     finally { setSubmitting(false); }
   }
   return <>
-    <ModalHeader title="Your daily targets" eyebrow={readableDate(date, { day: 'numeric', month: 'long' }).toUpperCase()} onClose={closeEditor}/>
+    <ModalHeader title="Daily targets" eyebrow={readableDate(date, { day: 'numeric', month: 'long' }).toUpperCase()} onClose={closeEditor}/>
     <p className="cal-modal-intro">Choose your deficit target and where calories burned comes from.</p>
     <p className="cal-target-date-hint" id="cal-deficit-date-hint">Changes apply to {readableDate(date, { day: 'numeric', month: 'long', year: 'numeric' })}. Leave the default-target option unchecked to edit only this date.</p>
     <form className="cal-form" onSubmit={submit}>
@@ -323,8 +324,8 @@ export function TransferDialog({ data, onImport, onClose }: { data: TrackerData;
   function exportCSV() {
     const columns: (keyof Entry)[] = ['date', 'meal', 'foodName', 'source', 'quantity', 'unit', 'pieces', 'state', 'carbs', 'protein', 'fat', 'fiber', 'calories'];
     const titles = ['Date', 'Meal', 'Food / meal name', 'Entry type', 'Quantity', 'Unit', 'Pieces', 'State', 'Carbs (g)', 'Protein (g)', 'Fat (g)', 'Fibre (g)', 'Calories (kcal)'];
-    // Prefix formula-like text to keep exported food names safe to open in a spreadsheet.
-    const cell = (value: unknown) => { let text = String(value); if (/^[=+@-]/.test(text)) text = `'${text}`; return `"${text.replaceAll('"', '""')}"`; };
+    // Prefix formula-like text (including a leading tab or line break) to keep exported food names safe to open in a spreadsheet.
+    const cell = (value: unknown) => { let text = String(value); if (/^[=+\-@\t\r\n]/.test(text)) text = `'${text}`; return `"${text.replaceAll('"', '""')}"`; };
     const csv = [titles.map(cell).join(','), ...[...data.entries].sort((a, b) => a.date.localeCompare(b.date)).map(entry => columns.map(column => cell(column === 'source' ? entry.source === 'manual' ? 'Manual estimate' : 'Food library' : entry.source === 'manual' && (column === 'quantity' || column === 'unit' || column === 'state') ? '' : entry[column] ?? '')).join(','))].join('\r\n');
     downloadFile('\uFEFF' + csv, `calories-entries-${exportDate}.csv`, 'text/csv;charset=utf-8');
   }
@@ -346,5 +347,5 @@ export function TransferDialog({ data, onImport, onClose }: { data: TrackerData;
     catch (error) { setError(errorMessage(error)); }
     finally { setBusy(false); }
   }
-  return <><ModalHeader title="Keep a copy of your days" eyebrow="BACKUP & IMPORT" onClose={onClose}/><p className="cal-modal-intro">Download your journal whenever you like.</p><div className="cal-transfer-option"><div><strong>Complete backup</strong><p>Foods, food bank portions, journal entries, and targets in a JSON file. Use this to restore your journal.</p></div><button className="cal-button cal-button-small" onClick={() => downloadFile(JSON.stringify(data, null, 2), `calories-backup-${exportDate}.json`, 'application/json')}><Icon name="download" size={16}/>JSON</button></div><div className="cal-transfer-option"><div><strong>Spreadsheet export</strong><p>All logged entries, quantities, and nutrition. Opens in Numbers or Google Sheets.</p></div><button className="cal-button cal-button-small" onClick={exportCSV}><Icon name="download" size={16}/>CSV</button></div><div className="cal-import-section"><h3>Restore a backup</h3><p>Choose a JSON file previously exported from this app.</p><label className="cal-file-label">{busy ? 'Reading backup…' : 'Choose JSON backup'}<input type="file" accept=".json,application/json" onChange={event => void selectFile(event.target.files?.[0])} disabled={busy}/></label>{incoming && <div className="cal-import-confirm"><strong>{filename}</strong><p>{incoming.foods.length} foods · {incoming.foodBank.length} bank portions · {incoming.entries.length} entries</p><p>This will replace your current journal, food library, food bank, and targets on every device. A copy of your current journal downloads first, so you can restore it if needed.</p><button className="cal-button cal-button-danger cal-button-small" disabled={busy} onClick={() => void restoreBackup()}>Replace journal with this backup</button></div>}{error && <p className="cal-form-error" role="alert">{error}</p>}</div><div className="cal-modal-actions"><button className="cal-button cal-button-primary" onClick={onClose}>Done</button></div></>;
+  return <><ModalHeader title="Backup and import" eyebrow="BACKUP & IMPORT" onClose={onClose}/><div className="cal-transfer-option"><div><strong>Complete backup</strong><p>Foods, food bank portions, journal entries, and targets in a JSON file. Use this to restore your journal.</p></div><button className="cal-button cal-button-small" onClick={() => downloadFile(JSON.stringify(data, null, 2), `calories-backup-${exportDate}.json`, 'application/json')}><Icon name="download" size={16}/>JSON</button></div><div className="cal-transfer-option"><div><strong>Spreadsheet export</strong><p>All logged entries, quantities, and nutrition. Opens in Numbers or Google Sheets.</p></div><button className="cal-button cal-button-small" onClick={exportCSV}><Icon name="download" size={16}/>CSV</button></div><div className="cal-import-section"><h3>Restore a backup</h3><p>Choose a JSON file previously exported from this app.</p><label className="cal-file-label">{busy ? 'Reading backup…' : 'Choose JSON backup'}<input type="file" accept=".json,application/json" onChange={event => void selectFile(event.target.files?.[0])} disabled={busy}/></label>{incoming && <div className="cal-import-confirm"><strong>{filename}</strong><p>{incoming.foods.length} foods · {incoming.foodBank.length} bank portions · {incoming.entries.length} entries</p><p>This will replace your current journal, food library, food bank, and targets on every device. A copy of your current journal downloads first, so you can restore it if needed.</p><button className="cal-button cal-button-danger cal-button-small" disabled={busy} onClick={() => void restoreBackup()}>Replace journal with this backup</button></div>}{error && <p className="cal-form-error" role="alert">{error}</p>}</div><div className="cal-modal-actions"><button className="cal-button cal-button-primary" onClick={onClose}>Done</button></div></>;
 }

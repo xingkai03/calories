@@ -1,12 +1,12 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { macrosForFood, type BankPortion, type Food, type Macros } from '../../lib/calories/model';
+import { canLogPieces, macrosForFood, quantityFromPieces, type BankPortion, type Food, type Macros } from '../../lib/calories/model';
 import { prepareFoodBankPortions } from '../../lib/calories/food-bank';
 import { mealForTime } from '../../lib/calories/food-order';
 import { DraftRestoredNotice, usePersistentFormDraft } from './FormDrafts';
+import { amountLabel } from './ui';
 import './food-bank.css';
 
 const number = (value: number, decimals = 1) => new Intl.NumberFormat('en-GB', { maximumFractionDigits: decimals }).format(value);
-const unitLabel = (unit: string, quantity: number) => unit === 'piece' ? quantity === 1 ? 'piece' : 'pieces' : unit;
 const zeroMacros = (): Macros => ({ calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 });
 function sumNutrition(items: readonly Macros[]): Macros {
   return items.reduce((total, item) => ({ calories: total.calories + item.calories, protein: total.protein + item.protein, carbs: total.carbs + item.carbs, fat: total.fat + item.fat, fiber: total.fiber + item.fiber }), zeroMacros());
@@ -21,7 +21,7 @@ function BankNutrition({ totals, label = 'Per portion' }: { totals: Macros; labe
   return <div className="cal-bank-nutrition"><div className="cal-bank-energy"><span>{label}</span><strong>{number(totals.calories, 0)} <small>kcal</small></strong></div><div className="cal-bank-macros">{([['Protein', totals.protein], ['Carbs', totals.carbs], ['Fat', totals.fat], ['Fibre', totals.fiber]] as const).map(([label, value]) => <span key={label}>{label}<strong>{number(value)} g</strong></span>)}</div></div>;
 }
 function BankIngredients({ portion }: { portion: BankPortion }) {
-  return <ul className="cal-bank-ingredients" aria-label="Ingredients in this portion">{portion.items.map((item, index) => <li key={`${item.id}-${index}`}><span>{item.foodName}<small>{item.state}</small></span><strong>{number(item.quantity, 3)} {unitLabel(item.unit, item.quantity)}</strong></li>)}</ul>;
+  return <ul className="cal-bank-ingredients" aria-label="Ingredients in this portion">{portion.items.map((item, index) => <li key={`${item.id}-${index}`}><span>{item.foodName}<small>{item.state}</small></span><strong>{amountLabel(item)}</strong></li>)}</ul>;
 }
 
 export function FoodBankView({ portions, onPrepare, onEat, onRemove }: { portions: readonly BankPortion[]; onPrepare: () => void; onEat: (portion: BankPortion) => void; onRemove: (id: string) => void }) {
@@ -36,11 +36,12 @@ export function FoodBankView({ portions, onPrepare, onEat, onRemove }: { portion
       <div className="cal-bank-card-heading"><span>1 prepared portion</span><BankIcon name="box" size={18}/></div><h2>{portion.name}</h2>
       <BankIngredients portion={portion}/><BankNutrition totals={sumNutrition(portion.items)}/>
       {removing === portion.id ? <div className="cal-bank-remove-confirm"><p>Remove this portion? It won’t be added to your journal.</p><div><button className="cal-text-button cal-bank-touch" type="button" onClick={() => setRemoving(null)}>Cancel</button><button className="cal-text-button cal-danger cal-bank-touch" type="button" onClick={() => { onRemove(portion.id); setRemoving(null); }}>Remove portion</button></div></div> : <div className="cal-bank-card-actions"><button className="cal-button cal-button-small cal-bank-eat" type="button" onClick={() => onEat(portion)}>Eat<BankIcon name="check" size={17}/></button><button className="cal-icon-button cal-bank-touch" type="button" aria-label={`Remove one portion of ${portion.name}`} onClick={() => setRemoving(portion.id)}><BankIcon name="trash" size={17}/></button></div>}
-    </article>)}</div> : <div className="cal-empty-journal cal-bank-empty"><span className="cal-empty-art"><BankIcon name="box" size={36}/></span><h3>{query ? 'No portions found.' : 'A little preparation, ready for later.'}</h3><p>{query ? 'Try a food or portion name.' : 'Prepare individual portions from your food library. Eat one to move its ingredients into your journal.'}</p><button className="cal-text-button cal-bank-touch" type="button" onClick={onPrepare}>Prepare portions<BankIcon name="plus" size={17}/></button></div>}
+    </article>)}</div> : <div className="cal-empty-journal cal-bank-empty"><span className="cal-empty-art"><BankIcon name="box" size={36}/></span><h3>{query ? 'No portions found.' : 'No prepared portions.'}</h3><p>{query ? 'Try a food or portion name.' : 'Prepare individual portions from your food library. Eat one to move its ingredients into your journal.'}</p><button className="cal-text-button cal-bank-touch" type="button" onClick={onPrepare}>Prepare portions<BankIcon name="plus" size={17}/></button></div>}
   </div>;
 }
 
-interface IngredientDraft { key: number; foodId: string; query: string; quantity: string }
+/** byPiece is optional so drafts saved before piece logging still restore. */
+interface IngredientDraft { key: number; foodId: string; query: string; quantity: string; byPiece?: boolean }
 export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Food[]; onSave: (portions: BankPortion[]) => void | Promise<void>; onClose: () => void }) {
   const id = useId();
   const form = usePersistentFormDraft('bank:prepare', { draftBatchId: crypto.randomUUID(), name: '', count: '1', ingredients: [{ key: 0, foodId: foods[0]?.id ?? '', query: '', quantity: '' }] as IngredientDraft[] }, value => ({ kind: 'bank-prepare', label: value.name.trim() || 'Prepared portions' }));
@@ -52,12 +53,15 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
   const [error, setError] = useState('');
   const matches = (food: Food, query: string) => food.name.toLowerCase().includes(query.trim().toLowerCase());
   const selectedFood = (ingredient: IngredientDraft) => foods.find(food => food.id === ingredient.foodId && matches(food, ingredient.query));
+  // An ingredient whose food has a piece weight starts in pieces, as in the log form.
+  const inPieces = (ingredient: IngredientDraft, food = selectedFood(ingredient)) => Boolean(food && canLogPieces(food) && (ingredient.byPiece ?? true));
+  const amountOf = (ingredient: IngredientDraft, food: Food, value: number) => inPieces(ingredient, food) ? quantityFromPieces(food, value) : value;
   const autoName = ingredients.map(selectedFood).filter((food): food is Food => Boolean(food)).map(food => food.name).join(' + ').slice(0, 160);
   const validPreviews = ingredients.flatMap(ingredient => {
     const food = selectedFood(ingredient);
     const quantity = Number(ingredient.quantity);
     if (!food || !ingredient.quantity.trim() || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1e8) return [];
-    const nutrients = macrosForFood(food, quantity);
+    const nutrients = macrosForFood(food, amountOf(ingredient, food, quantity));
     return Object.values(nutrients).every(value => Number.isFinite(value) && value >= 0 && value <= 1e8) ? [nutrients] : [];
   });
   const preview = sumNutrition(validPreviews);
@@ -68,7 +72,14 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
   }
   function filterIngredient(key: number, query: string) {
     const first = foods.find(food => matches(food, query));
-    updateIngredient(key, current => ({ ...current, query, foodId: first?.id ?? '', quantity: first?.id === current.foodId ? current.quantity : '' }));
+    updateIngredient(key, current => first?.id === current.foodId ? { ...current, query } : { ...current, query, foodId: first?.id ?? '', quantity: '', byPiece: undefined });
+  }
+  function changeIngredientUnit(ingredient: IngredientDraft, food: Food, pieces: boolean) {
+    if (!food.pieceWeight || inPieces(ingredient, food) === pieces) return;
+    const value = Number(ingredient.quantity);
+    // Convert what was typed so the portion stays the same.
+    const quantity = ingredient.quantity.trim() && Number.isFinite(value) && value > 0 ? String(Math.round((pieces ? value / food.pieceWeight : value * food.pieceWeight) * 100) / 100) : ingredient.quantity;
+    updateIngredient(ingredient.key, current => ({ ...current, quantity, byPiece: pieces }));
   }
   function addIngredient() {
     if (ingredients.length >= 50) return;
@@ -84,7 +95,7 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
     if (!Number.isInteger(Number(count)) || Number(count) < 1 || Number(count) > 100) { setError('Prepare between 1 and 100 whole portions.'); return; }
     try {
       let generatedId = 0;
-      const prepared = prepareFoodBankPortions(foods, ingredients.map(ingredient => ({ foodId: ingredient.foodId, quantity: Number(ingredient.quantity) })), Number(count), name.trim() || autoName, () => `${form.draft.draftBatchId}:${generatedId++}`);
+      const prepared = prepareFoodBankPortions(foods, ingredients.map(ingredient => inPieces(ingredient) ? { foodId: ingredient.foodId, pieces: Number(ingredient.quantity) } : { foodId: ingredient.foodId, quantity: Number(ingredient.quantity) }), Number(count), name.trim() || autoName, () => `${form.draft.draftBatchId}:${generatedId++}`);
       setSubmitting(true);
       await onSave(prepared);
       form.clearDraft();
@@ -92,7 +103,7 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
     finally { setSubmitting(false); }
   }
   return <>
-    <BankHeader title="Prepare food for later" onClose={closeEditor}/>
+    <BankHeader title="Prepare portions" onClose={closeEditor}/>
     <form className="cal-form cal-bank-editor" onSubmit={submit}>
       <DraftRestoredNotice {...form} disabled={submitting} discardDraft={() => { form.discardDraft(); setError(''); }}/>
       <fieldset className="cal-form cal-food-editor-fields" disabled={submitting}>
@@ -104,8 +115,9 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
         const food = selectedFood(ingredient);
         const fieldId = `${id}-${ingredient.key}`;
         return <fieldset className="cal-bank-ingredient-row" key={ingredient.key}><legend>Ingredient {index + 1}</legend><div className="cal-bank-ingredient-fields">
-          <div className="cal-food-picker"><label htmlFor={`${fieldId}-search`}>Food</label><div className="cal-food-picker-controls"><input id={`${fieldId}-search`} type="text" value={ingredient.query} onChange={event => filterIngredient(ingredient.key, event.target.value)} placeholder="Filter food names" autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={`${fieldId}-matches`}/><select aria-label={`Food for ingredient ${index + 1}`} value={food?.id ?? ''} onChange={event => updateIngredient(ingredient.key, current => ({ ...current, foodId: event.target.value, quantity: event.target.value === current.foodId ? current.quantity : '' }))} disabled={filtered.length === 0} required>{filtered.length === 0 && <option value="" disabled>No matching foods</option>}{filtered.map(food => <option key={food.id} value={food.id}>{food.name} · {food.state}</option>)}</select></div><small className="cal-bank-match-count" id={`${fieldId}-matches`} role="status">{filtered.length === 0 ? 'No matching foods' : ingredient.query.trim() ? `${filtered.length} matching ${filtered.length === 1 ? 'food' : 'foods'}` : ''}</small></div>
-          <label>Amount per portion<span className="cal-unit-input"><input type="number" inputMode="decimal" value={ingredient.quantity} onChange={event => updateIngredient(ingredient.key, current => ({ ...current, quantity: event.target.value }))} placeholder="Amount" min={0.001} max={100000000} step="any" required aria-describedby={`${id}-amounts`}/><span>{food?.unit ?? '—'}</span></span></label>
+          <div className="cal-food-picker"><label htmlFor={`${fieldId}-search`}>Food</label><div className="cal-food-picker-controls"><input id={`${fieldId}-search`} type="text" value={ingredient.query} onChange={event => filterIngredient(ingredient.key, event.target.value)} placeholder="Filter food names" autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={`${fieldId}-matches`}/><select aria-label={`Food for ingredient ${index + 1}`} value={food?.id ?? ''} onChange={event => updateIngredient(ingredient.key, current => event.target.value === current.foodId ? current : { ...current, foodId: event.target.value, quantity: '', byPiece: undefined })} disabled={filtered.length === 0} required>{filtered.length === 0 && <option value="" disabled>No matching foods</option>}{filtered.map(food => <option key={food.id} value={food.id}>{food.name} · {food.state}</option>)}</select></div><small className="cal-bank-match-count" id={`${fieldId}-matches`} role="status">{filtered.length === 0 ? 'No matching foods' : ingredient.query.trim() ? `${filtered.length} matching ${filtered.length === 1 ? 'food' : 'foods'}` : ''}</small></div>
+          <label>Amount per portion<span className="cal-unit-input"><input type="number" inputMode="decimal" value={ingredient.quantity} onChange={event => updateIngredient(ingredient.key, current => ({ ...current, quantity: event.target.value }))} placeholder="Amount" min={0.001} max={100000000} step="any" required aria-describedby={`${id}-amounts`}/><span>{food ? inPieces(ingredient, food) ? 'pieces' : food.unit : '—'}</span></span></label>
+          {food && canLogPieces(food) && <div className="cal-entry-mode-switch cal-amount-unit-switch" role="group" aria-label={`Amount of ingredient ${index + 1} in`}>{[true, false].map(pieces => <button key={String(pieces)} type="button" className={inPieces(ingredient, food) === pieces ? 'is-active' : ''} aria-pressed={inPieces(ingredient, food) === pieces} onClick={() => changeIngredientUnit(ingredient, food, pieces)}>{pieces ? `Pieces (${number(food.pieceWeight ?? 0, 2)} ${food.unit} each)` : food.unit === 'ml' ? 'Millilitres' : 'Grams'}</button>)}</div>}
           {ingredients.length > 1 && <button className="cal-icon-button cal-bank-touch cal-bank-remove-ingredient" type="button" aria-label={`Remove ingredient ${index + 1}`} onClick={() => { setIngredients(current => current.filter(item => item.key !== ingredient.key)); setError(''); }}><BankIcon name="trash" size={17}/></button>}
         </div></fieldset>;
       })}</div>

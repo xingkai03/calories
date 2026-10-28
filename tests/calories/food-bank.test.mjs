@@ -237,3 +237,28 @@ test('unconsumed preparation contributes no daily nutrients, recent food use, or
   assert.equal(dayTotals(consumed.entries).calories, 270.5);
   assert.equal(consumed.foodBank.length, 2);
 });
+
+test('manual estimates in the food bank log as manual entries when eaten', () => {
+  const portions = prepareFoodBankPortions(foods, [{ manual: { name: '  Curry  ', protein: 20, carbs: 40, fat: 10, fiber: 5 } }, { foodId: 'rice', quantity: 100 }], 2, 'Curry and rice', ids());
+  assert.equal(portions.length, 2);
+  const [estimate] = portions[0].items;
+  assert.deepEqual(estimate, {
+    id: 'id-2', foodId: 'manual:id-2', foodName: 'Curry', quantity: 1, unit: 'piece', state: 'As served',
+    protein: 20, carbs: 40, fat: 10, fiber: 5, calories: 330,
+  });
+  assert.equal(portions[1].items[0].foodId, 'manual:id-5');
+  const data = { ...emptyData(), foods: foods.map(food => ({ ...food })), foodBank: portions };
+  const eaten = consumeFoodBankPortion(data, portions[0].id, '2026-10-28', 'Dinner');
+  const entry = eaten.entries.find(item => item.id === 'id-2');
+  assert.equal(entry.source, 'manual');
+  assert.equal(entry.calories, 330);
+  assert.equal(eaten.entries.find(item => item.id === 'id-3').source, undefined);
+});
+
+test('manual food-bank estimates need a name and finite non-negative nutrients', () => {
+  const make = manual => prepareFoodBankPortions([], [{ manual }], 1, 'Estimate', ids());
+  assert.throws(() => make({ name: ' ', protein: 1, carbs: 1, fat: 1, fiber: 0 }), /name/);
+  assert.throws(() => make({ name: 'Soup', protein: -1, carbs: 1, fat: 1, fiber: 0 }), /non-negative/);
+  assert.throws(() => make({ name: 'Soup', protein: Number.NaN, carbs: 1, fat: 1, fiber: 0 }), /non-negative/);
+  assert.equal(make({ name: 'Soup', protein: 0, carbs: 0, fat: 0, fiber: 0 })[0].items[0].calories, 0);
+});

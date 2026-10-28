@@ -5,11 +5,21 @@ function positiveQuantity(value: number): number {
   return value;
 }
 
+function nonNegative(value: number, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1e8) throw new Error(`Enter a finite, non-negative ${label} estimate.`);
+  return value;
+}
+
+/** A manual estimate gives one portion's nutrient totals directly, like a manual journal entry. */
+export interface ManualIngredient { manual: { name: string; protein: number; carbs: number; fat: number; fiber: number } }
+export type BankIngredientInput = { foodId: string; quantity?: number; pieces?: number } | ManualIngredient;
+
 /** Ingredient quantities describe one portion; batching makes independent snapshots.
- * An ingredient given in `pieces` uses its food's piece weight, like a journal entry logged by the piece. */
+ * An ingredient given in `pieces` uses its food's piece weight, like a journal entry logged by the piece.
+ * A manual ingredient is stored as 1 'As served' piece with foodId `manual:<item id>`, so eating it logs a manual estimate. */
 export function prepareFoodBankPortions(
   foods: readonly Food[],
-  ingredients: readonly { foodId: string; quantity?: number; pieces?: number }[],
+  ingredients: readonly BankIngredientInput[],
   count: number,
   name: string,
   makeId: () => string,
@@ -21,6 +31,13 @@ export function prepareFoodBankPortions(
   const library = new Map(normalizeData({ ...emptyData(), foods }).foods.map(food => [food.id, food]));
   const snapshots = ingredients.map(ingredient => {
     if (!ingredient || typeof ingredient !== 'object' || Array.isArray(ingredient)) throw new Error('Invalid food-bank ingredient.');
+    if ('manual' in ingredient) {
+      if (!ingredient.manual || typeof ingredient.manual !== 'object') throw new Error('Invalid food-bank ingredient.');
+      const { name: estimateName, ...values } = ingredient.manual;
+      if (typeof estimateName !== 'string' || !estimateName.trim() || estimateName.length > 160) throw new Error('Give each estimated ingredient a name.');
+      const nutrients = { protein: nonNegative(values.protein, 'protein'), carbs: nonNegative(values.carbs, 'carbohydrate'), fat: nonNegative(values.fat, 'fat'), fiber: nonNegative(values.fiber, 'fibre') };
+      return { foodId: null, foodName: estimateName.trim(), quantity: 1, unit: 'piece' as const, state: 'As served' as const, ...nutrients, calories: energyFromMacros(nutrients) };
+    }
     const food = library.get(ingredient.foodId);
     if (!food) throw new Error('Choose an existing food for each ingredient.');
     if (ingredient.pieces !== undefined && !canLogPieces(food)) throw new Error(`${food.name} has no piece weight. Enter its amount in ${food.unit}.`);
@@ -37,7 +54,10 @@ export function prepareFoodBankPortions(
     return id;
   };
   const portions = Array.from({ length: count }, () => ({
-    id: nextId(), name: name.trim(), items: snapshots.map(snapshot => ({ ...snapshot, id: nextId() })),
+    id: nextId(), name: name.trim(), items: snapshots.map(({ foodId, ...snapshot }) => {
+      const id = nextId();
+      return { id, foodId: foodId ?? `manual:${id}`, ...snapshot };
+    }),
   }));
   // Apply the same numerical bounds and collision checks used for backups.
   return normalizeData({ ...emptyData(), foodBank: portions }).foodBank;

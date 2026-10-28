@@ -1,4 +1,4 @@
-import { addDays, todayISO, type DaySettings } from './model.ts';
+import { addDays, isCalendarDate, todayISO, type DaySettings } from './model.ts';
 
 /** Imported Garmin readings stay separate from the editable food journal. */
 export interface GarminDay {
@@ -47,9 +47,7 @@ function calories(value: unknown, label: string): number {
 }
 
 function date(value: unknown): string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('Garmin returned an invalid date.');
-  const parsed = new Date(`${value}T12:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) throw new Error('Garmin returned an invalid date.');
+  if (typeof value !== 'string' || !isCalendarDate(value)) throw new Error('Garmin returned an invalid date.');
   return value;
 }
 

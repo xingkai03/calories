@@ -45,10 +45,14 @@ export function todayISO(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
+/** Calendar arithmetic on YYYY-MM-DD dates. Built from numbers rather than by parsing a string,
+ * since the running balance calls this many times per logged day. */
 export function addDays(date: string, offset: number): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + offset);
-  return d.toISOString().slice(0, 10);
+  const d = new Date(0);
+  d.setUTCFullYear(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)) + offset);
+  const year = d.getUTCFullYear();
+  if (year < 0 || year > 9999) return d.toISOString().slice(0, 10);
+  return `${String(year).padStart(4, '0')}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 export function macrosForFood(food: Food, quantity: number): Macros {
@@ -100,9 +104,16 @@ function pieces(value: unknown, entryUnit: Unit): { pieces?: number } {
   if (entryUnit === 'piece') throw new Error('Invalid piece count: the quantity is already in pieces.');
   return { pieces: number(value, 'piece count', true) };
 }
+/** A real calendar date in YYYY-MM-DD form. Checked arithmetically: this runs for every entry on each save. */
+export function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4)), month = Number(value.slice(5, 7)), day = Number(value.slice(8, 10));
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return month >= 1 && month <= 12 && day >= 1 && day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+}
 function date(value: unknown): string {
   const s = text(value, 'date', 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T12:00:00Z`)) || new Date(`${s}T12:00:00Z`).toISOString().slice(0, 10) !== s) throw new Error('Invalid date.');
+  if (!isCalendarDate(s)) throw new Error('Invalid date.');
   return s;
 }
 function macros(value: Record<string, unknown>): Macros {

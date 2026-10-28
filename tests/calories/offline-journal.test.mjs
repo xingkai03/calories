@@ -74,11 +74,11 @@ test('offline drafts survive reload, contain no auth secrets, and require a veri
   assert.deepEqual((await restored.openJournal()).data.entries, [meal('local')]);
   h.state.time = start + REMEMBER_MS;
   assert.equal(await restored.restoreSession(), false);
-  assert.equal(restored.getJournalSnapshot(), null);
+  assert.equal((await restored.getJournalSnapshot()), null);
   await assert.rejects(restored.stageJournal(first.data), /session has ended/);
   const unverified = harness(); await unverified.client.signIn('owner@example.com', 'password', true); unverified.state.offline = true;
   await assert.rejects(unverified.reload().restoreSession(), /Cannot reach/);
-  assert.equal(unverified.client.getJournalSnapshot(), null);
+  assert.equal((await unverified.client.getJournalSnapshot()), null);
 });
 
 test('tab-only credentials cannot unlock an offline cache in another tab and explicit signout clears owner caches', async () => {
@@ -88,8 +88,8 @@ test('tab-only credentials cannot unlock an offline cache in another tab and exp
   h.state.offline = true;
   const freshTab = createClient({ ...h.options, sessionStorage: new MemoryStorage() });
   assert.equal(await freshTab.restoreSession(), false);
-  assert.equal(freshTab.getCachedGarmin(), null);
-  assert.equal(freshTab.getJournalSnapshot(), null);
+  assert.equal((await freshTab.getCachedGarmin()), null);
+  assert.equal((await freshTab.getJournalSnapshot()), null);
   assert.equal(await h.reload().restoreSession(), true);
   await h.client.signOut();
   assert.equal(h.local.getItem(journalCacheKey(url, owner)), null);
@@ -105,7 +105,7 @@ test('server user denial and revoked owner access never become an offline restor
   await h.client.openJournal();
   h.state.access = false;
   await assert.rejects(h.client.openJournal(), /session has ended|does not have access/);
-  assert.equal(h.client.getJournalSnapshot(), null);
+  assert.equal((await h.client.getJournalSnapshot()), null);
   h.state.offline = true;
   assert.equal(await h.reload().restoreSession(), false);
 });
@@ -123,11 +123,13 @@ test('reconnect merges disjoint entries and targets without losing either device
   const edit = { ...synced.data, entries: synced.data.entries.map(e => e.id === 'local' ? meal('local', 40) : e) };
   await h.client.stageJournal(edit, synced.localVersion);
   h.state.data.entries = h.state.data.entries.map(e => e.id === 'local' ? meal('local', 60) : e); h.state.revision++;
-  const writes = h.state.writes, conflict = await h.client.syncJournal();
+  // The write-first attempt is refused by the stale revision; the conflict then stops any overwrite.
+  const revision = h.state.revision, conflict = await h.client.syncJournal();
   assert.equal(conflict.pending, true); assert.match(conflict.conflict, /same journal entry/);
-  assert.equal(h.state.writes, writes);
+  assert.equal(h.state.revision, revision);
+  assert.equal(h.state.data.entries.find(e => e.id === 'local').protein, 60);
   assert.equal(conflict.data.entries.find(e => e.id === 'local').protein, 40);
-  assert.equal(h.reload().getJournalSnapshot().conflict, conflict.conflict);
+  assert.equal((await h.reload().getJournalSnapshot()).conflict, conflict.conflict);
   assert.notEqual(staged.localVersion, synced.localVersion);
 });
 
@@ -150,7 +152,7 @@ test('the local snapshot is durable before a held write and newer edits during t
   let release; h.state.holdWrite = new Promise(resolve => { release = resolve; });
   const syncing = h.client.syncJournal();
   while (!h.state.writes) await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(h.reload().getJournalSnapshot().data.entries, [meal('first')]);
+  assert.deepEqual((await h.reload().getJournalSnapshot()).data.entries, [meal('first')]);
   const newer = await h.client.stageJournal(append(staged.data, meal('second')), staged.localVersion);
   assert.equal(newer.data.entries.length, 2);
   h.state.holdWrite = null; release();
@@ -162,16 +164,16 @@ test('the local snapshot is durable before a held write and newer edits during t
 test('shared-tab local locks merge stale disjoint edits and reject a stale overlapping record instead of overwriting', async () => {
   const h = harness(); const first = await open(h);
   const other = createClient({ ...h.options, sessionStorage: new MemoryStorage() });
-  const second = other.getJournalSnapshot();
+  const second = (await other.getJournalSnapshot());
   const [a, b] = await Promise.all([
     h.client.stageJournal(append(first.data, meal('one')), first.localVersion),
     other.stageJournal(append(second.data, meal('two')), second.localVersion),
   ]);
   assert.equal(b.data.entries.length, 2);
-  const before = h.client.getJournalSnapshot(), beforeOther = other.getJournalSnapshot();
+  const before = (await h.client.getJournalSnapshot()), beforeOther = (await other.getJournalSnapshot());
   await h.client.stageJournal({ ...before.data, entries: before.data.entries.map(e => e.id === 'one' ? meal('one', 30) : e) }, before.localVersion);
   await assert.rejects(other.stageJournal({ ...beforeOther.data, entries: beforeOther.data.entries.map(e => e.id === 'one' ? meal('one', 50) : e) }, beforeOther.localVersion), JournalConflictError);
-  assert.equal(h.client.getJournalSnapshot().data.entries.find(e => e.id === 'one').protein, 30);
+  assert.equal((await h.client.getJournalSnapshot()).data.entries.find(e => e.id === 'one').protein, 30);
   assert.equal(a.data.entries.length, 1);
 });
 
@@ -194,10 +196,10 @@ test('discard requires an online read and quota failure cannot send or silently 
   const staged = await h.client.stageJournal(append(first.data, meal('pending')), first.localVersion);
   h.state.offline = true;
   await assert.rejects(h.client.discardJournalChanges(), /Cannot reach/);
-  assert.equal(h.client.getJournalSnapshot().data.entries.length, 1);
+  assert.equal((await h.client.getJournalSnapshot()).data.entries.length, 1);
   h.state.offline = false; h.local.blocked = true;
   await assert.rejects(h.client.stageJournal(append(staged.data, meal('quota')), staged.localVersion), /could not keep/);
-  assert.equal(h.state.writes, 0); assert.equal(h.client.getJournalSnapshot().data.entries.length, 1);
+  assert.equal(h.state.writes, 0); assert.equal((await h.client.getJournalSnapshot()).data.entries.length, 1);
   h.local.blocked = false;
   const discarded = await h.client.discardJournalChanges();
   assert.equal(discarded.pending, false); assert.equal(discarded.data.entries.length, 0);
@@ -207,9 +209,9 @@ test('cached Garmin readings retain their original timestamps offline and disapp
   const h = harness(); await open(h);
   const reading = await h.client.loadGarmin(); h.state.offline = true;
   assert.deepEqual(await h.reload().loadGarmin(), reading);
-  assert.deepEqual(h.reload().getCachedGarmin(), reading);
+  assert.deepEqual((await h.reload().getCachedGarmin()), reading);
   h.state.time = start + REMEMBER_MS;
-  assert.equal(h.reload().getCachedGarmin(), null);
+  assert.equal((await h.reload().getCachedGarmin()), null);
 });
 
 test('a first journal can be staged offline after an authorized empty load and inserts only the owner row', async () => {
@@ -248,7 +250,7 @@ test('discarding cannot erase an edit another tab stages while the saved cloud c
   await h.client.stageJournal(append(first.data, meal('during-discard')), first.localVersion);
   h.state.holdRead = null; release();
   await assert.rejects(discarding, /while saved data was being reloaded/);
-  assert.deepEqual(h.client.getJournalSnapshot().data.entries, [meal('during-discard')]);
+  assert.deepEqual((await h.client.getJournalSnapshot()).data.entries, [meal('during-discard')]);
 });
 
 test('signout during a held save cannot resurrect a cleared journal or cached credentials', async () => {
@@ -262,7 +264,7 @@ test('signout during a held save cannot resurrect a cleared journal or cached cr
   h.state.holdWrite = null; release();
   assert.match((await result).message, /session has ended/);
   assert.equal(h.local.getItem(journalCacheKey(url, owner)), null);
-  assert.equal(h.reload().getJournalSnapshot(), null);
+  assert.equal((await h.reload().getJournalSnapshot()), null);
   assert.equal(await h.reload().restoreSession(), false);
 });
 
@@ -285,7 +287,7 @@ test('interrupted streamed response bodies fall back to verified cache, while in
   await assert.rejects(h.reload().openJournal(), /storage response was invalid/);
   h.state.bodyFailure = { path: '/auth/v1/user', status: 403, error: new TypeError('connection interrupted after rejection') };
   assert.equal(await h.reload().restoreSession(), false);
-  assert.equal(h.client.getJournalSnapshot(), null);
+  assert.equal((await h.client.getJournalSnapshot()), null);
 });
 
 test('an interrupted successful save body remains pending and resolves the committed write on the next read', async () => {

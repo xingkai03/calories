@@ -193,7 +193,8 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     garminFetching.current = true;
     setGarminLoading(true);
     try {
-      const latest = await client.loadGarmin();
+      // Background checks fetch only newly imported days; opening the app or Refresh reloads them all.
+      const latest = await client.loadGarmin({ changedOnly: !force });
       if (!mounted.current || request !== garminRequest.current || phaseRef.current !== 'ready') return;
       if (modalRef.current && modalRef.current.type !== 'garmin') deferredGarmin.current = latest;
       else setGarmin(latest);
@@ -247,7 +248,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   async function loadData() {
     const snapshot = await client.openJournal();
     acceptJournal(snapshot);
-    const cachedGarmin = client.getCachedGarmin();
+    const cachedGarmin = await client.getCachedGarmin();
     if (cachedGarmin) setGarmin(cachedGarmin);
     setPhase('ready');
     if (phaseRef.current === 'ready') void refreshGarmin(true);

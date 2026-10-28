@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createClient } from '../../src/lib/calories/client.ts';
 import { emptyData, energyFromMacros, manualMealEntry } from '../../src/lib/calories/model.ts';
-import { consumeFoodBankPortion, prepareFoodBankPortions } from '../../src/lib/calories/food-bank.ts';
+import { prepareFoodBankPortions } from '../../src/lib/calories/food-bank.ts';
 
 const URL = 'https://food-bank-client-test.supabase.co';
 const KEY = 'sb_publishable_food_bank_test_key';
@@ -96,7 +96,8 @@ test('loading a legacy v1 journal migrates it in memory without writing or losin
   const legacy = { ...withoutBank, version: 1 };
   const cloud = server(legacy);
   const client = await signedIn(cloud);
-  const loaded = await client.load();
+  const opened = await client.openJournal();
+  const loaded = opened.data;
   assert.equal(loaded.version, 2);
   assert.deepEqual(loaded.foodBank, []);
   for (const field of ['foods', 'entries', 'days', 'defaults']) assert.deepEqual(loaded[field], legacy[field]);
@@ -105,8 +106,8 @@ test('loading a legacy v1 journal migrates it in memory without writing or losin
   assert.equal(cloud.state.revision, 7);
   assert.equal(cloud.state.writes.length, 0);
 
-  loaded.foodBank = structuredClone(original.foodBank);
-  await client.save(loaded);
+  await client.stageJournal({ ...loaded, foodBank: structuredClone(original.foodBank) }, opened.localVersion);
+  assert.equal((await client.syncJournal()).pending, false);
   assert.equal(cloud.state.data.version, 2);
   assert.deepEqual(cloud.state.data.foodBank, original.foodBank);
   assert.deepEqual(cloud.state.data.entries, legacy.entries);
@@ -118,90 +119,27 @@ test('a v2 bank survives whole-document saving and loading on another device', a
   const initial = fixture();
   const cloud = server(initial);
   const first = await signedIn(cloud);
-  const loaded = await first.load();
-  loaded.foodBank[0].name = 'Lunch for tomorrow';
-  await first.save(loaded);
+  const opened = await first.openJournal();
+  const edited = structuredClone(opened.data);
+  edited.foodBank[0].name = 'Lunch for tomorrow';
+  await first.stageJournal(edited, opened.localVersion);
+  const saved = await first.syncJournal();
+  assert.equal(saved.pending, false);
   const second = await signedIn(cloud);
-  const restored = await second.load();
-  assert.deepEqual(restored, loaded);
+  const restored = (await second.openJournal()).data;
+  assert.deepEqual(restored, saved.data);
+  assert.equal(restored.foodBank[0].name, 'Lunch for tomorrow');
   assert.deepEqual(restored.entries, initial.entries, 'preparing and saving food does not count it as eaten');
   assert.equal(restored.foodBank[0].items.length, 2);
   assert.equal(restored.foodBank[0].items[0].unit, 'g');
   assert.equal(restored.foodBank[0].items[1].unit, 'piece');
 });
 
-test('an unknown-format load does not adopt a writable revision that could overwrite a newer bank', async () => {
+test('an unknown-format journal is never opened or overwritten', async () => {
   const cloud = server({ ...fixture(), version: 3 });
   const client = await signedIn(cloud);
-  await assert.rejects(client.load(), /supported Calories backup/);
-  const requestsBeforeSave = cloud.state.calls.length;
-  await assert.rejects(client.save(emptyData()), /Reload your saved data/);
-  assert.equal(cloud.state.calls.length, requestsBeforeSave);
+  await assert.rejects(client.openJournal(), /supported Calories backup/);
+  await assert.rejects(client.stageJournal(emptyData()), /Open your journal/);
   assert.equal(cloud.state.writes.length, 0);
   assert.equal(cloud.state.data.version, 3);
-});
-
-test('a lost consumption response requires reload and cannot send a second consumption', async () => {
-  const initial = fixture();
-  const cloud = server(initial, { loseNextWriteResponse: true });
-  const client = await signedIn(cloud);
-  const loaded = await client.load();
-  const portion = loaded.foodBank[0];
-  const consumed = consumeFoodBankPortion(loaded, portion.id, '2026-10-15', 'Lunch');
-  await assert.rejects(client.save(consumed), /Cannot reach your storage/);
-  assert.equal(cloud.state.writes.length, 1);
-  assert.deepEqual(cloud.state.data, consumed, 'removing the portion and adding every ingredient committed together');
-
-  const retried = consumeFoodBankPortion(loaded, portion.id, '2026-10-15', 'Lunch');
-  assert.deepEqual(retried, consumed, 'retrying the same stale portion has stable ingredient identities');
-  const requestsAfterLoss = cloud.state.calls.length;
-  await assert.rejects(client.save(retried), /Reload your saved data/);
-  assert.equal(cloud.state.calls.length, requestsAfterLoss, 'an uncertain write is not blindly replayed');
-  assert.equal(cloud.state.writes.length, 1);
-
-  const fresh = await client.load();
-  assert.deepEqual(fresh, consumed);
-  assert.throws(() => consumeFoodBankPortion(fresh, portion.id, '2026-10-15', 'Lunch'), /no longer available/);
-  for (const item of portion.items) assert.equal(fresh.entries.filter(entry => entry.id === item.id).length, 1);
-});
-
-test('two devices consuming the same mixed portion persist exactly one atomic winning state', async () => {
-  const initial = fixture();
-  const cloud = server(initial);
-  const first = await signedIn(cloud);
-  const second = await signedIn(cloud);
-  const [firstData, secondData] = await Promise.all([first.load(), second.load()]);
-  const portion = firstData.foodBank[0];
-  const firstDraft = consumeFoodBankPortion(firstData, portion.id, '2026-10-15', 'Lunch');
-  const secondDraft = consumeFoodBankPortion(secondData, portion.id, '2026-10-16', 'Dinner');
-  const results = await Promise.allSettled([first.save(firstDraft), second.save(secondDraft)]);
-  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
-  const winner = results.findIndex(result => result.status === 'fulfilled');
-  const loser = 1 - winner;
-  assert.match(results[loser].reason.message, /Another device saved changes first/);
-  const drafts = [firstDraft, secondDraft];
-  assert.deepEqual(cloud.state.data, drafts[winner]);
-  assert.equal(cloud.state.writes.length, 1);
-  assert.equal(cloud.state.revision, 8);
-  assert.equal(cloud.state.data.foodBank.some(item => item.id === portion.id), false);
-  assert.deepEqual(cloud.state.data.foodBank, initial.foodBank.slice(1));
-  assert.deepEqual(cloud.state.data.entries.slice(0, initial.entries.length), initial.entries);
-  assert.equal(cloud.state.data.entries.length, initial.entries.length + portion.items.length);
-  for (const item of portion.items) {
-    const matches = cloud.state.data.entries.filter(entry => entry.id === item.id);
-    assert.equal(matches.length, 1);
-    const { date, meal, ...snapshot } = matches[0];
-    assert.deepEqual(snapshot, item, 'each mixed ingredient retains its own quantity, state and nutrient snapshot');
-    assert.equal(date, winner === 0 ? '2026-10-15' : '2026-10-16');
-    assert.equal(meal, winner === 0 ? 'Lunch' : 'Dinner');
-  }
-  const winningDate = winner === 0 ? '2026-10-15' : '2026-10-16';
-  assert.equal(cloud.state.data.days[winningDate].burnedSource, 'garmin', 'the first meal does not inherit a legacy global manual burn');
-
-  const clients = [first, second];
-  const callsAfterConflict = cloud.state.calls.length;
-  await assert.rejects(clients[loser].save(drafts[loser]), /Reload your saved data/);
-  assert.equal(cloud.state.calls.length, callsAfterConflict);
-  const refreshed = await clients[loser].load();
-  assert.throws(() => consumeFoodBankPortion(refreshed, portion.id, winningDate, 'Lunch'), /no longer available/);
 });

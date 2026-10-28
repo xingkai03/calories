@@ -71,3 +71,7 @@
   .cal-bank-section-heading { align-items: flex-start; flex-direction: column; }
   .cal-bank-consume-summary { padding: 14px 15px 0; }
 }
+.cal-bank-source-switch { margin-bottom: 12px; }
+.cal-bank-estimate-fields { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cal-bank-estimate-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.cal-bank-estimate-footer small { color: #5d6858; font-size: 11px; line-height: 1.6; }

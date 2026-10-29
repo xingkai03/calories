@@ -97,3 +97,23 @@ export function consumeFoodBankPortion(data: TrackerData, portionId: string, dat
     days: { ...current.days, [date]: daySettings },
   });
 }
+
+export interface BankGroup { name: string; portions: BankPortion[] }
+
+/** Portions with the same name and the same ingredients and amounts, ignoring IDs. A manual estimate's foodId embeds its own item ID, so it compares as 'manual'. */
+function portionKey(portion: BankPortion): string {
+  return JSON.stringify([portion.name, portion.items.map(({ id, foodId, foodName, quantity, unit, state, pieces, calories, protein, carbs, fat, fiber }) =>
+    [foodId === `manual:${id}` ? 'manual' : foodId, foodName, quantity, unit, state, pieces ?? null, calories, protein, carbs, fat, fiber])]);
+}
+
+/** Groups identical portions in first-prepared order; each group lists its oldest portion first, which is the one eaten or removed next. */
+export function groupFoodBankPortions(portions: readonly BankPortion[]): BankGroup[] {
+  const groups = new Map<string, BankGroup>();
+  for (const portion of portions) {
+    const key = portionKey(portion);
+    const group = groups.get(key);
+    if (group) group.portions.push(portion);
+    else groups.set(key, { name: portion.name, portions: [portion] });
+  }
+  return [...groups.values()];
+}

@@ -262,3 +262,19 @@ test('manual food-bank estimates need a name and finite non-negative nutrients',
   assert.throws(() => make({ name: 'Soup', protein: Number.NaN, carbs: 1, fat: 1, fiber: 0 }), /non-negative/);
   assert.equal(make({ name: 'Soup', protein: 0, carbs: 0, fat: 0, fiber: 0 })[0].items[0].calories, 0);
 });
+
+test('identical portions group together and the oldest is eaten first', async () => {
+  const { groupFoodBankPortions } = await import('../../src/lib/calories/food-bank.ts');
+  const batch = prepare(3);
+  const other = prepareFoodBankPortions(foods, [{ foodId: 'rice', quantity: 200 }, { foodId: 'egg', quantity: 1 }], 1, 'Rice and egg', ids('big'));
+  const estimate = prepareFoodBankPortions(foods, [{ manual: { name: 'Curry', protein: 20, carbs: 30, fat: 10, fiber: 4 } }], 2, 'Curry', ids('curry'));
+  const groups = groupFoodBankPortions([batch[0], other[0], ...estimate, batch[1], batch[2]]);
+  assert.deepEqual(groups.map(group => [group.name, group.portions.map(portion => portion.id)]), [
+    ['Rice and egg', [batch[0].id, batch[1].id, batch[2].id]],
+    ['Rice and egg', [other[0].id]],
+    ['Curry', estimate.map(portion => portion.id)],
+  ]);
+  const data = { ...emptyData(), foods: foods.map(food => ({ ...food })), foodBank: batch };
+  const after = consumeFoodBankPortion(data, groups[0].portions[0].id, '2026-10-29', 'Lunch');
+  assert.deepEqual(groupFoodBankPortions(after.foodBank).map(group => group.portions.length), [2]);
+});

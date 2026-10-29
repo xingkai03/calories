@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { canLogPieces, energyFromMacros, macrosForFood, quantityFromPieces, type BankItem, type BankPortion, type Food, type Macros } from '../../lib/calories/model';
-import { prepareFoodBankPortions, type BankIngredientInput } from '../../lib/calories/food-bank';
+import { groupFoodBankPortions, prepareFoodBankPortions, type BankIngredientInput } from '../../lib/calories/food-bank';
 import { mealForTime } from '../../lib/calories/food-order';
 import { DraftRestoredNotice, usePersistentFormDraft } from './FormDrafts';
 import { amountLabel, NumericField } from './ui';
@@ -29,15 +29,17 @@ export function FoodBankView({ portions, onPrepare, onEat, onRemove }: { portion
   const [search, setSearch] = useState('');
   const [removing, setRemoving] = useState<string | null>(null);
   const query = search.trim().toLowerCase();
-  const visible = portions.filter(portion => portion.name.toLowerCase().includes(query) || portion.items.some(item => item.foodName.toLowerCase().includes(query)));
+  const visible = groupFoodBankPortions(portions).filter(group => group.name.toLowerCase().includes(query) || group.portions[0].items.some(item => item.foodName.toLowerCase().includes(query)));
+  const visibleCount = visible.reduce((total, group) => total + group.portions.length, 0);
+  const portionsLabel = (count: number) => `${count} ${count === 1 ? 'portion' : 'portions'}`;
   return <div className="cal-bank-view">
     <div className="cal-bank-toolbar"><div className="cal-bank-search"><BankIcon name="search" size={17}/><input type="search" aria-label="Search prepared portions" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search prepared food"/></div><button className="cal-button cal-button-primary" type="button" onClick={onPrepare}><BankIcon name="plus"/>Prepare portions</button></div>
-    <p className="cal-bank-count" role="status">{query ? `${visible.length} matching ${visible.length === 1 ? 'portion' : 'portions'}` : `${portions.length} prepared ${portions.length === 1 ? 'portion' : 'portions'}`}</p>
-    {visible.length > 0 ? <div className="cal-bank-grid">{visible.map(portion => <article className="cal-food-card cal-bank-card" key={portion.id}>
-      <div className="cal-bank-card-heading"><span>1 prepared portion</span><BankIcon name="box" size={18}/></div><h2>{portion.name}</h2>
+    <p className="cal-bank-count" role="status">{query ? `${visibleCount} matching ${visibleCount === 1 ? 'portion' : 'portions'}` : `${portions.length} prepared ${portions.length === 1 ? 'portion' : 'portions'}`}</p>
+    {visible.length > 0 ? <div className="cal-bank-grid">{visible.map(({ name, portions: group }) => { const portion = group[0]; return <article className="cal-food-card cal-bank-card" key={portion.id}>
+      <div className="cal-bank-card-heading"><span>{portionsLabel(group.length)} left</span><BankIcon name="box" size={18}/></div><h2>{name}</h2>
       <BankIngredients portion={portion}/><BankNutrition totals={sumNutrition(portion.items)}/>
-      {removing === portion.id ? <div className="cal-bank-remove-confirm"><p>Remove this portion? It won’t be added to your journal.</p><div><button className="cal-text-button cal-bank-touch" type="button" onClick={() => setRemoving(null)}>Cancel</button><button className="cal-text-button cal-danger cal-bank-touch" type="button" onClick={() => { onRemove(portion.id); setRemoving(null); }}>Remove portion</button></div></div> : <div className="cal-bank-card-actions"><button className="cal-button cal-button-small cal-bank-eat" type="button" onClick={() => onEat(portion)}>Eat<BankIcon name="check" size={17}/></button><button className="cal-icon-button cal-bank-touch" type="button" aria-label={`Remove one portion of ${portion.name}`} onClick={() => setRemoving(portion.id)}><BankIcon name="trash" size={17}/></button></div>}
-    </article>)}</div> : <div className="cal-empty-journal cal-bank-empty"><span className="cal-empty-art"><BankIcon name="box" size={36}/></span><h3>{query ? 'No portions found.' : 'No prepared portions.'}</h3><p>{query ? 'Try a food or portion name.' : 'Prepare individual portions from your food library or your own estimates. Eat one to move its ingredients into your journal.'}</p><button className="cal-text-button cal-bank-touch" type="button" onClick={onPrepare}>Prepare portions<BankIcon name="plus" size={17}/></button></div>}
+      {removing === portion.id ? <div className="cal-bank-remove-confirm"><p>Remove one portion? It won’t be added to your journal.</p><div><button className="cal-text-button cal-bank-touch" type="button" onClick={() => setRemoving(null)}>Cancel</button><button className="cal-text-button cal-danger cal-bank-touch" type="button" onClick={() => { onRemove(portion.id); setRemoving(null); }}>Remove portion</button></div></div> : <div className="cal-bank-card-actions"><button className="cal-button cal-button-small cal-bank-eat" type="button" aria-label={`Eat one portion of ${name}`} onClick={() => onEat(portion)}>Eat 1<BankIcon name="check" size={17}/></button><button className="cal-icon-button cal-bank-touch" type="button" aria-label={`Remove one portion of ${name}`} onClick={() => setRemoving(portion.id)}><BankIcon name="trash" size={17}/></button></div>}
+    </article>; })}</div> : <div className="cal-empty-journal cal-bank-empty"><span className="cal-empty-art"><BankIcon name="box" size={36}/></span><h3>{query ? 'No portions found.' : 'No prepared portions.'}</h3><p>{query ? 'Try a food or portion name.' : 'Prepare individual portions from your food library or your own estimates. Eat one to move its ingredients into your journal.'}</p><button className="cal-text-button cal-bank-touch" type="button" onClick={onPrepare}>Prepare portions<BankIcon name="plus" size={17}/></button></div>}
   </div>;
 }
 

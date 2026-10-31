@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { listFormDrafts, readFormDraft, removeFormDraft, restoreFormDraft, writeFormDraft, type FormDraftDescriptor, type FormDraftSummary } from '../../lib/calories/form-drafts';
+import { t } from '../../lib/calories/i18n';
 import './form-drafts.css';
 
 export { clearFormDrafts } from '../../lib/calories/form-drafts';
@@ -53,7 +54,7 @@ export function usePersistentFormDraft<T extends object>(key: string, seed: T, d
     try {
       writeFormDraft(context.scope, key, valueRef.current, typeof description.current === 'function' ? description.current(valueRef.current) : description.current);
       context.refresh();
-    } catch { setStorageError('Draft recovery is unavailable on this device. Keep this form open until you save.'); }
+    } catch { setStorageError(t('Draft recovery is unavailable on this device. Keep this form open until you save.')); }
   }, [context.scope, key]);
   useEffect(() => {
     if (!storageError) return;
@@ -64,7 +65,7 @@ export function usePersistentFormDraft<T extends object>(key: string, seed: T, d
 
   const clearDraft = () => {
     try { context.discard(key); if (mounted.current) { setStorageError(''); setRecovered(false); } }
-    catch { if (mounted.current) setStorageError('Draft recovery is unavailable on this device.'); }
+    catch { if (mounted.current) setStorageError(t('Draft recovery is unavailable on this device.')); }
   };
   const setDraft: Dispatch<SetStateAction<T>> = update => {
     const value = typeof update === 'function' ? (update as (current: T) => T)(valueRef.current) : update;
@@ -76,7 +77,7 @@ export function usePersistentFormDraft<T extends object>(key: string, seed: T, d
       else writeFormDraft(context.scope, key, value, typeof description.current === 'function' ? description.current(value) : description.current);
       context.refresh();
       setStorageError('');
-    } catch { setStorageError('Draft recovery is unavailable on this device. Keep this form open until you save.'); }
+    } catch { setStorageError(t('Draft recovery is unavailable on this device. Keep this form open until you save.')); }
   };
   function field<K extends keyof T>(name: K): [T[K], Dispatch<SetStateAction<T[K]>>] {
     return [draft[name], update => setDraft(current => ({ ...current, [name]: typeof update === 'function' ? (update as (value: T[K]) => T[K])(current[name]) : update }))];
@@ -90,5 +91,5 @@ export function usePersistentFormDraft<T extends object>(key: string, seed: T, d
 }
 
 export function DraftRestoredNotice({ recovered, discardDraft, storageError, disabled = false }: { recovered: boolean; discardDraft: () => void; storageError?: string; disabled?: boolean }) {
-  return <>{recovered && <div className="cal-draft-restored" role="status"><span>Draft restored</span><button className="cal-text-button" type="button" onClick={discardDraft} disabled={disabled}>Discard draft</button></div>}{storageError && <p className="cal-form-error" role="status">{storageError}</p>}</>;
+  return <>{recovered && <div className="cal-draft-restored" role="status"><span>{t('Draft restored')}</span><button className="cal-text-button" type="button" onClick={discardDraft} disabled={disabled}>{t('Discard draft')}</button></div>}{storageError && <p className="cal-form-error" role="status">{storageError}</p>}</>;
 }

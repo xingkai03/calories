@@ -242,10 +242,15 @@ test('Garmin reads use owner/session access and leave journal revision unchanged
   assert.equal((await h.client.syncJournal()).pending, false);
 });
 
-test('Garmin denied/expired access does not look like an empty disconnected account', async () => {
+test('Garmin shows not connected for an approved account without Garmin import', async () => {
   const h = harness(() => json([]));
   await h.client.signIn('owner@example.com', 'password-value', true);
-  await assert.rejects(h.client.loadGarmin(), /setup is incomplete|access has expired/);
+  assert.deepEqual(await h.client.loadGarmin(), { days: [], status: { state: 'not_connected', last_attempt_at: null, last_sync_at: null, last_error_code: null } });
+});
+
+test('Garmin expired access does not look like an empty disconnected account', async () => {
+  const h = harness(() => json([]));
+  await h.client.signIn('owner@example.com', 'password-value', true);
   h.setTime(start + REMEMBER_MS);
   const before = h.calls.length;
   await assert.rejects(h.client.loadGarmin(), /session has ended/);

@@ -19,15 +19,32 @@ Supabase verifies the password; the app never saves it. Email/password sign-in r
 4. In the project's Data API settings, keep the **`private`** schema out of **Exposed schemas**. The app's table and safe boolean RPC live in `public`.
 5. Run [`backend/calories/verify.sql`](../backend/calories/verify.sql) in SQL Editor. It should finish with **“Calories database verification passed; all test changes rolled back.”** It creates temporary test sessions and temporarily changes tracker state in one transaction, then rolls everything back. If an assertion fails, run `ROLLBACK;` before retrying and fix the reported issue.
 
-The setup creates `public.calories_state`, with one JSON document for your food library, food bank, entries, daily targets, and default targets. It can be rerun for the same UUID without deleting your records. Changing the configured owner while records exist fails rather than transferring those records.
+The setup creates `public.calories_state`, with one JSON document per approved account for its food library, food bank, entries, daily targets, and default targets, and `private.calories_members`, the list of approved accounts. The owner UUID is always added to that list. It can be rerun without deleting records or members.
 
 Database protections apply independently of the interface:
 
-- Anonymous visitors have no table permissions. Other signed-in accounts cannot read or write this tracker.
-- The only approved UUID can select its row, insert its first document, and update the `data` column. The browser cannot change ownership, supply revisions, or delete the state row.
-- Row Level Security requires both the approved owner and an active Auth session created less than 30 days ago. It rejects revoked sessions and sessions past their explicit `not_after` expiry.
+- Anonymous visitors have no table permissions. Signed-in accounts that are not in `private.calories_members` cannot read or write anything.
+- Each approved account can select only its own row, insert its own first document, and update that row's `data` column. Nobody can read or change another member's journal. The browser cannot change ownership, supply revisions, delete the state row, or read or change the member list.
+- Row Level Security requires an approved account, a row matching that account, and an active Auth session created less than 30 days ago. It rejects revoked sessions and sessions past their explicit `not_after` expiry.
 - A database trigger sets the first revision to `1` and increments it on each save. The app updates only the revision it last loaded; another device's newer save causes a conflict instead of an overwrite.
 - `public.calories_access_allowed()` is a non-privileged boolean RPC available only to signed-in users. The app checks it before loading, so denied access does not appear as an empty tracker. Its privileged session lookup stays inside the unexposed `private` schema.
+
+### Sharing the project with someone else
+
+Each person you approve gets their own private journal in your project.
+
+1. Under **Authentication → Users**, use **Add user → Create new user** to create their email/password account with a confirmed email. Keep public sign-ups turned off.
+2. In the SQL Editor, approve the account:
+
+   ```sql
+   insert into private.calories_members (user_id)
+     select id from auth.users where email = 'friend@example.com'
+     on conflict do nothing;
+   ```
+
+3. They open `https://xingkai03.github.io/calories/` and sign in with that email and password. The project URL and publishable key are built in, so they do not need to enter them.
+
+To remove access, run `delete from private.calories_members where user_id = (select id from auth.users where email = 'friend@example.com');`. Their sessions lose access immediately and their journal stays in `public.calories_state` until you delete it. Garmin import remains the owner's only; other members see Garmin as not connected. The photo reader accepts any approved member, so their photo reads use this project's Gemini key. As the project admin you can see every member's data in the dashboard.
 
 These grants and policies follow Supabase's [Row Level Security guidance](https://supabase.com/docs/guides/database/postgres/row-level-security). The session check follows its documented [session validation after sign-out](https://supabase.com/docs/guides/auth/sessions).
 

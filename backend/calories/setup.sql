@@ -2,7 +2,18 @@
 -- Configured for the confirmed email/password account supplied by the owner.
 -- Run this entire script in the calories project (wjobefnfswnftvthybiv).
 -- Keep the private schema out of the API's Exposed schemas setting.
--- This script is repeatable for the same owner and preserves existing data.
+-- This script is repeatable and preserves existing data and members.
+--
+-- Several people can share one project. Each approved account (a "member")
+-- gets its own private journal row; nobody can read or change another
+-- member's journal. The owner below is always a member. To approve someone
+-- else, create their account in Authentication > Users, then run:
+--   insert into private.calories_members (user_id)
+--     select id from auth.users where email = 'friend@example.com'
+--     on conflict do nothing;
+-- To remove access (their journal is kept until you delete it):
+--   delete from private.calories_members
+--     where user_id = (select id from auth.users where email = 'friend@example.com');
 
 begin;
 
@@ -19,6 +30,32 @@ $$;
 
 create schema if not exists private;
 grant usage on schema private to authenticated;
+
+-- Approved accounts. The browser has no access to this table; only the
+-- security-definer check below reads it, and only for the caller's own ID.
+create table if not exists private.calories_members (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  added_at timestamptz not null default now()
+);
+revoke all on table private.calories_members from public, anon, authenticated;
+alter table private.calories_members enable row level security;
+insert into private.calories_members (user_id)
+  values (current_setting('calories.setup_owner')::uuid)
+  on conflict (user_id) do nothing;
+
+create or replace function private.calories_is_member()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select auth.uid() is not null
+    and exists (select 1 from private.calories_members as member where member.user_id = auth.uid());
+$$;
+
+revoke all on function private.calories_is_member() from public, anon, authenticated;
+grant execute on function private.calories_is_member() to authenticated;
 
 -- This function returns only a boolean for the caller's own session. It does
 -- not expose Auth records, accept another user's ID, or allow session writes.
@@ -57,24 +94,18 @@ grant execute on function private.calories_session_active() to authenticated;
 
 -- A small non-privileged RPC lets the app distinguish a genuinely new account
 -- from an empty result caused by denied RLS access. It reveals only a boolean.
-do $$
-begin
-  execute format($function$
-    create or replace function public.calories_access_allowed()
-    returns boolean
-    language sql
-    stable
-    security invoker
-    set search_path = ''
-    as $body$
-      select coalesce(
-        (select auth.uid()) = %L::uuid
-        and (select private.calories_session_active()),
-        false
-      );
-    $body$;
-  $function$, current_setting('calories.setup_owner'));
-end;
+create or replace function public.calories_access_allowed()
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select coalesce(
+    (select private.calories_is_member())
+    and (select private.calories_session_active()),
+    false
+  );
 $$;
 revoke all on function public.calories_access_allowed() from public, anon, authenticated;
 grant execute on function public.calories_access_allowed() to authenticated;
@@ -88,18 +119,9 @@ create table if not exists public.calories_state (
   updated_at timestamptz not null default now()
 );
 
--- Pin the table itself to one account, in addition to the RLS owner gate.
--- Changing the configured owner while data exists fails instead of transferring
--- somebody else's records. All changes roll back if setup fails.
+-- Earlier versions pinned the table to a single owner. Membership and the
+-- per-user RLS gate below replace that pin. All changes roll back on failure.
 alter table public.calories_state drop constraint if exists calories_state_single_owner;
-do $$
-begin
-  execute format(
-    'alter table public.calories_state add constraint calories_state_single_owner check (user_id = %L::uuid)',
-    current_setting('calories.setup_owner')
-  );
-end;
-$$;
 
 -- The browser writes only data. The database owns revisions and timestamps,
 -- making a conditional PATCH using revision safe against stale device writes.
@@ -138,16 +160,13 @@ grant insert (user_id, data) on public.calories_state to authenticated;
 grant update (data) on public.calories_state to authenticated;
 
 -- The restrictive gate still applies if a permissive policy is added later.
+-- Each member reaches only the row whose user_id is their own account.
 drop policy if exists calories_owner_gate on public.calories_state;
-do $$
-begin
-  execute format(
-    'create policy calories_owner_gate on public.calories_state as restrictive for all to authenticated using (user_id = %L::uuid and (select auth.uid()) = user_id and (select private.calories_session_active())) with check (user_id = %L::uuid and (select auth.uid()) = user_id and (select private.calories_session_active()))',
-    current_setting('calories.setup_owner'),
-    current_setting('calories.setup_owner')
-  );
-end;
-$$;
+drop policy if exists calories_member_gate on public.calories_state;
+create policy calories_member_gate on public.calories_state
+  as restrictive for all to authenticated
+  using ((select auth.uid()) = user_id and (select private.calories_is_member()) and (select private.calories_session_active()))
+  with check ((select auth.uid()) = user_id and (select private.calories_is_member()) and (select private.calories_session_active()));
 
 drop policy if exists calories_owner_select on public.calories_state;
 create policy calories_owner_select on public.calories_state
@@ -164,7 +183,7 @@ create policy calories_owner_update on public.calories_state
   with check ((select auth.uid()) = user_id);
 
 comment on table public.calories_state is
-  'Single-owner calorie tracker state. Authenticated owner only; no anonymous access or browser DELETE. Revision is advanced by the database.';
+  'Calorie tracker state, one private row per approved member. Each member reaches only their own row; no anonymous access or browser DELETE. Revision is advanced by the database.';
 
 notify pgrst, 'reload schema';
 commit;

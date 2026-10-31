@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import type { EffectiveBurned, GarminStatus } from '../../lib/calories/garmin';
+import { t, dateLocale, translateMessage } from '../../lib/calories/i18n';
 
-export type IconName = 'leaf' | 'plus' | 'left' | 'right' | 'close' | 'edit' | 'trash' | 'settings' | 'download' | 'lock' | 'logout' | 'check' | 'search' | 'history' | 'calendar' | 'arrow' | 'book' | 'watch' | 'refresh';
+export type IconName = 'leaf' | 'plus' | 'left' | 'right' | 'close' | 'edit' | 'trash' | 'settings' | 'download' | 'gear' | 'lock' | 'logout' | 'check' | 'search' | 'history' | 'calendar' | 'arrow' | 'book' | 'watch' | 'refresh';
 
 export function Icon({ name, size = 20, ...props }: { name: IconName; size?: number; className?: string }) {
   const paths: Record<IconName, ReactNode> = {
@@ -13,6 +14,7 @@ export function Icon({ name, size = 20, ...props }: { name: IconName; size?: num
     edit: <><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5Z"/></>,
     trash: <><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></>,
     settings: <><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></>,
+    gear: <><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></>,
     download: <><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5"/></>,
     lock: <><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></>,
     logout: <><path d="M10 4H4v16h6M9 12h12m-4-4 4 4-4 4"/></>,
@@ -30,41 +32,46 @@ export function Icon({ name, size = 20, ...props }: { name: IconName; size?: num
 
 export const number = (value: number, decimals = 0) => new Intl.NumberFormat('en-GB', { maximumFractionDigits: decimals }).format(value);
 export const signedNumber = (value: number, decimals = 1) => value > 0 ? `+${number(value, decimals)}` : value < 0 ? `−${number(Math.abs(value), decimals)}` : '0';
-export const readableDate = (date: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-GB', options).format(new Date(`${date}T12:00:00`));
-export const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+export const readableDate = (date: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(dateLocale(), options).format(new Date(`${date}T12:00:00`));
+export const errorMessage = (error: unknown) => error instanceof Error ? translateMessage(error.message) : t('Something went wrong. Please try again.');
 export const newId = () => crypto.randomUUID();
-export const unitLabel = (unit: string, quantity: number) => unit === 'piece' ? (quantity === 1 ? 'piece' : 'pieces') : unit;
+export const unitLabel = (unit: string, quantity: number) => unit === 'piece' ? (quantity === 1 ? t('piece') : t('pieces')) : unit;
+/** A standard meal (Breakfast, Lunch, Dinner, Snack) in the current language; a custom meal name stays as typed. */
+export const mealLabel = (meal: string) => STANDARD_MEALS.includes(meal) ? t(meal) : meal;
+const STANDARD_MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+/** A food state (Raw, Cooked, As served) in the current language. */
+export const stateLabel = (state: string) => t(state);
 /** How much was logged: "2 pieces · 38 g" when logged by the piece, otherwise "38 g". */
 export const amountLabel = (item: { quantity: number; unit: string; pieces?: number }) => `${item.pieces !== undefined ? `${number(item.pieces, 2)} ${unitLabel('piece', item.pieces)} · ` : ''}${number(item.quantity, 2)} ${unitLabel(item.unit, item.quantity)}`;
 export const previewNumber = (value: string) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
-export const syncTime = (timestamp: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
-export const burnedLabel = (value: EffectiveBurned) => value.source === 'garmin' ? value.unavailable ? 'Garmin unavailable' : value.restingEstimate ? 'Garmin resting estimate' : value.activeEstimate !== undefined ? 'Your active estimate' : value.predicted ? 'Garmin prediction' : value.predictionUnavailable ? 'Garmin partial total' : 'Garmin' : 'Manual override';
+export const syncTime = (timestamp: string) => new Intl.DateTimeFormat(dateLocale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timestamp));
+export const burnedLabel = (value: EffectiveBurned) => t(value.source === 'garmin' ? value.unavailable ? 'Garmin unavailable' : value.restingEstimate ? 'Garmin resting estimate' : value.activeEstimate !== undefined ? 'Your active estimate' : value.predicted ? 'Garmin prediction' : value.predictionUnavailable ? 'Garmin partial total' : 'Garmin' : 'Manual override');
 export function burnedFormula(value: EffectiveBurned) {
-  if (value.unavailable) return 'No imported total is available for this date, and no completed Garmin resting reading is available yet';
-  if (value.restingEstimate && value.restingDay) return `${number(value.restingDay.resting)} resting kcal from ${readableDate(value.restingDay.date, { day: 'numeric', month: 'short', year: 'numeric' })}, used as an estimate for this day`;
+  if (value.unavailable) return t('No imported total is available for this date, and no completed Garmin resting reading is available yet');
+  if (value.restingEstimate && value.restingDay) return t('{resting} resting kcal from {date}, used as an estimate for this day', { resting: number(value.restingDay.resting), date: readableDate(value.restingDay.date, { day: 'numeric', month: 'short', year: 'numeric' }) });
   if (value.activeEstimate !== undefined && value.restingDay) {
-    const active = value.day && value.day.active > value.activeEstimate ? `${number(value.day.active)} active so far (above your ${number(value.activeEstimate)} estimate)` : `${number(value.activeEstimate)} active (your estimate)`;
-    return `${active} + ${number(value.restingDay.resting)} resting (${readableDate(value.restingDay.date, { day: 'numeric', month: 'short' })})`;
+    const active = value.day && value.day.active > value.activeEstimate ? t('{active} active so far (above your {estimate} estimate)', { active: number(value.day.active), estimate: number(value.activeEstimate) }) : t('{active} active (your estimate)', { active: number(value.activeEstimate) });
+    return t('{active} + {resting} resting ({date})', { active, resting: number(value.restingDay.resting), date: readableDate(value.restingDay.date, { day: 'numeric', month: 'short' }) });
   }
-  if (value.predicted && value.day && value.restingDay) return `${number(value.day.active)} active today + ${number(value.restingDay.resting)} resting yesterday (${readableDate(value.restingDay.date, { day: 'numeric', month: 'short' })})`;
-  if (value.predictionUnavailable) return 'Yesterday’s resting calories are unavailable. Using Garmin’s partial total so far';
-  return value.day ? `${number(value.day.active)} active + ${number(value.day.resting)} resting kcal` : '';
+  if (value.predicted && value.day && value.restingDay) return t('{active} active today + {resting} resting yesterday ({date})', { active: number(value.day.active), resting: number(value.restingDay.resting), date: readableDate(value.restingDay.date, { day: 'numeric', month: 'short' }) });
+  if (value.predictionUnavailable) return t('Yesterday’s resting calories are unavailable. Using Garmin’s partial total so far');
+  return value.day ? t('{active} active + {resting} resting kcal', { active: number(value.day.active), resting: number(value.day.resting) }) : '';
 }
 export function burnedSyncTime(value: EffectiveBurned) {
-  if (value.restingEstimate && value.restingDay) return `Resting imported ${syncTime(value.restingDay.synced_at)}`;
-  if (!value.day) return value.activeEstimate !== undefined && value.restingDay ? `Resting imported ${syncTime(value.restingDay.synced_at)}` : '';
-  return value.predicted && value.restingDay && value.day.synced_at !== value.restingDay.synced_at ? `Active updated ${syncTime(value.day.synced_at)} · Resting imported ${syncTime(value.restingDay.synced_at)}` : `Updated ${syncTime(value.day.synced_at)}`;
+  if (value.restingEstimate && value.restingDay) return t('Resting imported {time}', { time: syncTime(value.restingDay.synced_at) });
+  if (!value.day) return value.activeEstimate !== undefined && value.restingDay ? t('Resting imported {time}', { time: syncTime(value.restingDay.synced_at) }) : '';
+  return value.predicted && value.restingDay && value.day.synced_at !== value.restingDay.synced_at ? t('Active updated {active} · Resting imported {resting}', { active: syncTime(value.day.synced_at), resting: syncTime(value.restingDay.synced_at) }) : t('Updated {time}', { time: syncTime(value.day.synced_at) });
 }
 export const staleImport = (timestamp: string | null) => Boolean(timestamp && Date.now() - Date.parse(timestamp) > 2 * 60 * 60 * 1000);
-export const garminStatusLabel = (status: GarminStatus) => ({ not_connected: 'Not connected', connected: status.last_sync_at ? staleImport(status.last_sync_at) ? 'Needs a new import' : 'Connected' : 'Waiting for first import', needs_login: 'Sign-in needed', error: 'Import needs attention' })[status.state];
+export const garminStatusLabel = (status: GarminStatus) => t(({ not_connected: 'Not connected', connected: status.last_sync_at ? staleImport(status.last_sync_at) ? 'Needs a new import' : 'Connected' : 'Waiting for first import', needs_login: 'Sign-in needed', error: 'Import needs attention' })[status.state]);
 export function garminErrorMeaning(code: string | null) {
   if (!code) return '';
   const meanings: Record<string, string> = { missing_data: 'Garmin hasn’t reported complete calorie data yet.', upstream_unavailable: 'Garmin couldn’t be reached. A later import will try again.', needs_login: 'Sign in to Garmin again to resume automatic imports.', rate_limited: 'Garmin is temporarily limiting requests. A later import will try again.' };
-  return meanings[code] ?? 'The last import could not finish. Check the connection setup if this continues.';
+  return t(meanings[code] ?? 'The last import could not finish. Check the connection setup if this continues.');
 }
 
 export function ModalHeader({ title, eyebrow, onClose }: { title: string; eyebrow: string; onClose: () => void }) {
-  return <div className="cal-modal-heading"><div><div className="cal-eyebrow">{eyebrow}</div><h2 id="cal-dialog-title">{title}</h2></div><button className="cal-icon-button" type="button" onClick={onClose} aria-label="Close dialog"><Icon name="close"/></button></div>;
+  return <div className="cal-modal-heading"><div><div className="cal-eyebrow">{eyebrow}</div><h2 id="cal-dialog-title">{title}</h2></div><button className="cal-icon-button" type="button" onClick={onClose} aria-label={t('Close dialog')}><Icon name="close"/></button></div>;
 }
 
 export function NumericField({ label, value, onChange, unit = 'g', min = 0, required = true, describedBy, placeholder }: { label: string; value: string; onChange: (value: string) => void; unit?: string; min?: number; required?: boolean; describedBy?: string; placeholder?: string }) {

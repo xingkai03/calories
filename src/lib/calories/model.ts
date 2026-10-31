@@ -19,7 +19,10 @@ export type FoodWindow = (typeof FOOD_WINDOWS)[number];
 export const FOOD_SORTS: readonly FoodSort[] = ['frequent', 'recent', 'name'];
 export interface FoodListPreferences { window: FoodWindow; sort: FoodSort }
 export const DEFAULT_FOOD_LIST: FoodListPreferences = { window: 7, sort: 'frequent' };
-export interface Preferences { foodList: FoodListPreferences }
+/** The display language; absent means the device's own choice (English by default). */
+export const LANGUAGE_CODES = ['en', 'zh-CN'] as const;
+export type LanguageCode = (typeof LANGUAGE_CODES)[number];
+export interface Preferences { foodList: FoodListPreferences; language?: LanguageCode }
 /** Preferences are optional so journals saved before they existed stay byte-for-byte identical. */
 export interface TrackerData { version: 2; foods: Food[]; entries: Entry[]; foodBank: BankPortion[]; days: Record<string, DaySettings>; defaults: DaySettings; preferences?: Preferences }
 
@@ -129,7 +132,9 @@ function settings(raw: unknown): DaySettings {
 function preferences(raw: unknown): Preferences {
   const foodList = record(record(raw).foodList);
   if (!FOOD_WINDOWS.includes(foodList.window as FoodWindow) || !FOOD_SORTS.includes(foodList.sort as FoodSort)) throw new Error('Invalid food list settings.');
-  return { foodList: { window: foodList.window as FoodWindow, sort: foodList.sort as FoodSort } };
+  const language = record(raw).language;
+  if (language !== undefined && !LANGUAGE_CODES.includes(language as LanguageCode)) throw new Error('Invalid language setting.');
+  return { foodList: { window: foodList.window as FoodWindow, sort: foodList.sort as FoodSort }, ...(language !== undefined ? { language: language as LanguageCode } : {}) };
 }
 export function foodListPreferences(data: TrackerData): FoodListPreferences { return data.preferences?.foodList ?? DEFAULT_FOOD_LIST; }
 

@@ -16,7 +16,8 @@ import JournalView from './JournalView';
 import FoodsView from './FoodsView';
 import SummaryView from './SummaryView';
 import { applyCaloriesUpdate, CALORIES_UPDATE_EVENT } from '../../lib/calories/offline-shell';
-import { Icon, number, errorMessage, downloadFile } from './ui';
+import { Icon, ModalHeader, number, errorMessage, downloadFile } from './ui';
+import { t, getLanguage, setLanguage, storedLanguage, storeLanguage, translateMessage, LANGUAGES, LANGUAGE_NAMES, type Language } from '../../lib/calories/i18n';
 import './calories.css';
 import './offline.css';
 
@@ -52,7 +53,7 @@ function urlFor(view: View, date: string, currentDay: string): string {
 }
 type Phase = 'loading' | 'setup' | 'login' | 'ready';
 type SaveState = 'saved' | 'pending' | 'saving' | 'device' | 'offline' | 'error';
-export type ModalState = { type: 'entry'; entry?: Entry; foodId?: string; meal?: string } | { type: 'food'; food?: Food; returnToLog?: boolean } | { type: 'targets' } | { type: 'transfer' } | { type: 'garmin' } | { type: 'bank-prepare' } | { type: 'bank-consume'; portion: BankPortion } | { type: 'food-details'; food: Food } | null;
+export type ModalState = { type: 'entry'; entry?: Entry; foodId?: string; meal?: string } | { type: 'food'; food?: Food; returnToLog?: boolean } | { type: 'targets' } | { type: 'transfer' } | { type: 'garmin' } | { type: 'bank-prepare' } | { type: 'bank-consume'; portion: BankPortion } | { type: 'food-details'; food: Food } | { type: 'settings' } | null;
 
 
 export default function CaloriesApp({ clientOverride }: { clientOverride?: ReturnType<typeof createClient> } = {}) {
@@ -110,6 +111,8 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   const closingModalByCode = useRef(false);
   const locationRef = useRef({ view, date, currentDay: todayISO() });
   const lastGarminRefresh = useRef(0);
+  // English on the server and first paint; the device's saved choice applies right after mounting.
+  const [language, setLanguageState] = useState<Language>('en');
 
   useEffect(() => {
     let dayTimer: ReturnType<typeof setTimeout>;
@@ -127,6 +130,19 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }, []);
 
   locationRef.current = { view, date, currentDay };
+
+  useEffect(() => { showLanguage(storedLanguage()); }, []);
+  function showLanguage(next: Language) {
+    setLanguage(next);
+    storeLanguage(next);
+    setLanguageState(next);
+  }
+  /** The choice applies at once on this device and syncs with the journal, so other devices follow. */
+  async function changeLanguage(next: Language) {
+    showLanguage(next);
+    if (phaseRef.current !== 'ready' || dataRef.current.preferences?.language === next) return;
+    if (!(await updateData(current => ({ ...current, preferences: { ...current.preferences, foodList: foodListPreferences(current), language: next } })))) setSaveError(lastLocalError.current);
+  }
 
   useEffect(() => {
     const onUpdate = (event: Event) => setUpdateWorker((event as CustomEvent<ServiceWorker>).detail);
@@ -205,7 +221,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function disconnectGarmin() {
-    if (!window.confirm('Disconnect Garmin? Automatic imports will stop. Previously imported calorie readings will be kept.')) return;
+    if (!window.confirm(t('Disconnect Garmin? Automatic imports will stop. Previously imported calorie readings will be kept.'))) return;
     const scope = garminSessionScope.current;
     garminRequest.current++; garminFetching.current = false;
     disconnectingGarmin.current = true; setGarminDisconnecting(true); setGarminLoadError('');
@@ -224,7 +240,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     setOffline(snapshot.offline);
     setJournalScope(client.getJournalScope());
     blockedSave.current = Boolean(snapshot.conflict);
-    setSaveError(snapshot.conflict ?? '');
+    setSaveError(snapshot.conflict ? translateMessage(snapshot.conflict) : '');
     if (!localStage && modalRef.current) {
       deferredJournal.current = { snapshot, version: expectedChange };
     } else if (changeVersion.current === expectedChange) {
@@ -233,6 +249,9 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
       dataRef.current = snapshot.data;
       setData(snapshot.data);
       queue.current = snapshot.pending ? snapshot.data : null;
+      // A language chosen on another device follows the journal here.
+      const synced = snapshot.data.preferences?.language;
+      if (synced && synced !== getLanguage()) showLanguage(synced);
     }
     setSaveState(snapshot.conflict ? 'error' : snapshot.offline ? 'offline' : queue.current ? 'device' : 'saved');
   }
@@ -253,8 +272,8 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function reloadSavedData() {
-    if (saving.current || refreshing.current || localWrites.current) { setSaveError('Wait for the current save or refresh to finish before reloading.'); return; }
-    if (!window.confirm('Reload the saved journal? Unsaved changes on this device will be discarded.')) return;
+    if (saving.current || refreshing.current || localWrites.current) { setSaveError(t('Wait for the current save or refresh to finish before reloading.')); return; }
+    if (!window.confirm(t('Reload the saved journal? Unsaved changes on this device will be discarded.'))) return;
     setUndoNotice(null);
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     blockedSave.current = true;
@@ -318,7 +337,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
         if (active && !valid) {
           setModal(null);
           setPhase('login');
-          setNotice('Your session has ended. Sign in again to recover your saved device drafts.');
+          setNotice(t('Your session has ended. Sign in again to recover your saved device drafts.'));
         } else if (active && (refreshData || queue.current) && !modalRef.current) {
           await flushSave();
         }
@@ -399,7 +418,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     let action: UndoAction | undefined;
     let text = '';
     const persisted = await updateData(current => {
-      if (!scope || client.getJournalScope() !== scope) throw new Error('Sign in again before changing your journal.');
+      if (!scope || client.getJournalScope() !== scope) throw new Error(t('Sign in again before changing your journal.'));
       const next = transform(current);
       action = createUndoAction(current, next, kind, id);
       text = message(current);
@@ -410,11 +429,11 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function undoLatest(action: UndoAction, scope: string) {
-    if (undoing.current) throw new Error('Wait for the current Undo to finish, then try again.');
+    if (undoing.current) throw new Error(t('Wait for the current Undo to finish, then try again.'));
     undoing.current = true;
     try {
       if (!(await updateData(current => {
-        if (client.getJournalScope() !== scope) throw new Error('This Undo belongs to an earlier sign-in.');
+        if (client.getJournalScope() !== scope) throw new Error(t('This Undo belongs to an earlier sign-in.'));
         return undoAction(current, action);
       }))) throw new Error(lastLocalError.current);
       if (action.kind === 'delete-entry') openDay(action.record.date);
@@ -424,15 +443,15 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function removeEntry(id: string) {
-    await updateWithUndo('delete-entry', id, current => ({ ...current, entries: current.entries.filter(entry => entry.id !== id) }), before => `Removed ${before.entries.find(entry => entry.id === id)?.foodName ?? 'entry'}.`);
+    await updateWithUndo('delete-entry', id, current => ({ ...current, entries: current.entries.filter(entry => entry.id !== id) }), before => t('Removed {name}.', { name: before.entries.find(entry => entry.id === id)?.foodName ?? t('entry') }));
   }
 
   function removeFood(id: string): Promise<boolean> {
-    return updateWithUndo('delete-food', id, current => ({ ...current, foods: current.foods.filter(food => food.id !== id) }), before => `Removed ${before.foods.find(food => food.id === id)?.name ?? 'food'} from the library.`);
+    return updateWithUndo('delete-food', id, current => ({ ...current, foods: current.foods.filter(food => food.id !== id) }), before => t('Removed {name} from the library.', { name: before.foods.find(food => food.id === id)?.name ?? t('food') }));
   }
 
   async function removeBankPortion(id: string) {
-    await updateWithUndo('delete-bank', id, current => ({ ...current, foodBank: current.foodBank.filter(portion => portion.id !== id) }), before => `Removed ${before.foodBank.find(portion => portion.id === id)?.name ?? 'prepared portion'}.`);
+    await updateWithUndo('delete-bank', id, current => ({ ...current, foodBank: current.foodBank.filter(portion => portion.id !== id) }), before => t('Removed {name}.', { name: before.foodBank.find(portion => portion.id === id)?.name ?? t('prepared portion') }));
   }
 
   async function signIn(event: FormEvent) {
@@ -448,10 +467,10 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function signOut() {
-    if (saving.current || localWrites.current) { setSaveError('Please wait for the current save to finish before signing out.'); return; }
+    if (saving.current || localWrites.current) { setSaveError(t('Please wait for the current save to finish before signing out.')); return; }
     if (queue.current || saving.current) {
       if (!(await flushSave())) {
-        if (!window.confirm('Sign out and discard unsaved changes on this device? Cancel and export a backup first if you want to keep them.')) return;
+        if (!window.confirm(t('Sign out and discard unsaved changes on this device? Cancel and export a backup first if you want to keep them.'))) return;
         queue.current = null;
         if (timer.current) { clearTimeout(timer.current); timer.current = null; }
       }
@@ -463,7 +482,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     const signOutRequest = client.signOut();
     garminRequest.current++; deferredGarmin.current = null; setGarmin(emptyGarminSnapshot()); setGarminLoadError(''); setGarminLoading(false);
     setPhase('login'); setModal(null); setData(emptyData()); dataRef.current = emptyData(); setJournalScope(null); journalVersion.current = undefined; setOffline(false); setRecoveryNotice(''); setNotice(''); setSaveError(''); setSaveState('saved'); blockedSave.current = false;
-    try { const signOutNotice = await signOutRequest; setNotice(signOutNotice ?? ''); }
+    try { const signOutNotice = await signOutRequest; setNotice(signOutNotice ? translateMessage(signOutNotice) : ''); }
     catch (error) { setNotice(errorMessage(error)); }
     finally { setBusy(false); }
   }
@@ -492,7 +511,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function eatBankPortion(portionId: string, entryDate: string, meal: string) {
-    if (!(await updateWithUndo('consume-bank', portionId, current => consumeFoodBankPortion(current, portionId, entryDate, meal), before => `Logged ${before.foodBank.find(portion => portion.id === portionId)?.name ?? 'prepared portion'}.`))) throw new Error(lastLocalError.current);
+    if (!(await updateWithUndo('consume-bank', portionId, current => consumeFoodBankPortion(current, portionId, entryDate, meal), before => t('Logged {name}.', { name: before.foodBank.find(portion => portion.id === portionId)?.name ?? t('prepared portion') })))) throw new Error(lastLocalError.current);
     setModal(null); openDay(entryDate);
   }
 
@@ -503,7 +522,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
       defaults: { ...current.defaults, deficit: rounded },
       days: current.days[currentDay] ? { ...current.days, [currentDay]: { ...current.days[currentDay], deficit: rounded } } : current.days,
     })))) throw new Error(lastLocalError.current);
-    setTrendsNotice(`Your default deficit is now ${number(rounded)} kcal, starting today.`);
+    setTrendsNotice(t('Your default deficit is now {kcal} kcal, starting today.', { kcal: number(rounded) }));
   }
 
   async function saveFoodList(change: Partial<FoodListPreferences>) {
@@ -521,11 +540,11 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     if (draft.date) setDate(draft.date);
     if (draft.kind === 'entry') {
       const entry = draft.entryId ? dataRef.current.entries.find(item => item.id === draft.entryId) : undefined;
-      if (draft.entryId && !entry) { setRecoveryNotice('The entry for this draft was removed. You can discard the draft below.'); return; }
+      if (draft.entryId && !entry) { setRecoveryNotice(t('The entry for this draft was removed. You can discard the draft below.')); return; }
       setView('journal'); setModal({ type: 'entry', entry, foodId: draft.foodId });
     } else if (draft.kind === 'food') {
       const food = draft.foodId ? dataRef.current.foods.find(item => item.id === draft.foodId) : undefined;
-      if (draft.foodId && !food) { setRecoveryNotice('The food for this draft was removed. You can discard the draft below.'); return; }
+      if (draft.foodId && !food) { setRecoveryNotice(t('The food for this draft was removed. You can discard the draft below.')); return; }
       setView('foods'); setModal({ type: 'food', food });
     } else if (draft.kind === 'targets') { setView('journal'); setModal({ type: 'targets' }); }
     else { setView('bank'); setModal({ type: 'bank-prepare' }); }
@@ -554,47 +573,49 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   const libraryIds = useMemo(() => new Set(data.foods.map(food => food.id)), [data.foods]);
 
   return <div className="calorie-app">
-    {updateWorker && <div className="cal-update-banner" role="status"><span>A new version of Calories is ready.</span><button className="cal-button cal-button-small cal-button-primary" onClick={() => void reloadForUpdate()}><Icon name="refresh" size={16}/>Reload</button></div>}
+    {updateWorker && <div className="cal-update-banner" role="status"><span>{t('A new version of Calories is ready.')}</span><button className="cal-button cal-button-small cal-button-primary" onClick={() => void reloadForUpdate()}><Icon name="refresh" size={16}/>{t('Reload')}</button></div>}
     {phase !== 'ready' ? <main className="cal-auth-shell">
-      <a className="cal-home-link" href="/">← Back to my website</a>
+      <a className="cal-home-link" href="/">{t('← Back to my website')}</a>
       <div className="cal-auth-brand"><span className="cal-brand-mark"><Icon name="leaf" size={24}/></span><span>calories<span className="cal-brand-dot">.</span></span></div>
-      {phase === 'loading' ? <div className="cal-auth-card cal-loading" role="status"><span className="cal-spinner"/><h1>Opening your journal</h1><p>Checking your saved session.</p></div>
+      {phase === 'loading' ? <div className="cal-auth-card cal-loading" role="status"><span className="cal-spinner"/><h1>{t('Opening your journal')}</h1><p>{t('Checking your saved session.')}</p></div>
         : phase === 'setup' ? <Setup onConfigure={(config) => { client.configure(config); setPhase('login'); setNotice(''); }} />
         : <div className="cal-auth-card">
-          <h1>Sign in</h1>
+          <h1>{t('Sign in')}</h1>
           <form onSubmit={signIn} className="cal-form">
-            <label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="username" required autoCapitalize="none" spellCheck={false} placeholder="Your account email" /></label>
-            <label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required placeholder="Your password" /></label>
-            <label className="cal-checkbox"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Remember this device for 30 days<small>Leave unchecked on a shared device.</small></span></label>
+            <label>{t('Email')}<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="username" required autoCapitalize="none" spellCheck={false} placeholder={t('Your account email')} /></label>
+            <label>{t('Password')}<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" required placeholder={t('Your password')} /></label>
+            <label className="cal-checkbox"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>{t('Remember this device for 30 days')}<small>{t('Leave unchecked on a shared device.')}</small></span></label>
             {notice && <p className="cal-form-error" role="alert">{notice}</p>}
-            <button className="cal-button cal-button-primary cal-button-full" disabled={busy}>{busy ? 'Signing in…' : 'Open my journal'}<Icon name="arrow" size={18}/></button>
+            <button className="cal-button cal-button-primary cal-button-full" disabled={busy}>{t(busy ? 'Signing in…' : 'Open my journal')}<Icon name="arrow" size={18}/></button>
           </form>
-          {queue.current && <button className="cal-text-button cal-auth-config" onClick={() => downloadFile(JSON.stringify(queue.current, null, 2), `calories-unsaved-${todayISO()}.json`, 'application/json')}>Export unsaved changes</button>}
-          <button className="cal-text-button cal-auth-config" onClick={() => { setPhase('setup'); setNotice(''); }}>Connection settings</button>
+          {queue.current && <button className="cal-text-button cal-auth-config" onClick={() => downloadFile(JSON.stringify(queue.current, null, 2), `calories-unsaved-${todayISO()}.json`, 'application/json')}>{t('Export unsaved changes')}</button>}
+          <button className="cal-text-button cal-auth-config" onClick={() => { setPhase('setup'); setNotice(''); }}>{t('Connection settings')}</button>
         </div>}
+      <LanguagePicker language={language} onChange={next => void changeLanguage(next)} compact/>
     </main> : <FormDraftProvider key={journalScope} scope={journalScope}>
       <header className="cal-header">
-        <a href="/calories/" className="cal-brand" aria-label="Calories home"><span className="cal-brand-mark"><Icon name="leaf" size={22}/></span><span>calories<span className="cal-brand-dot">.</span></span></a>
-        <nav className="cal-nav" aria-label="Journal navigation">
-          {([['journal', 'Journal'], ['foods', 'Foods'], ['bank', 'Food bank'], ['summary', 'Summary']] as [View, string][]).map(([key, label]) => <button key={key} className={view === key ? 'is-active' : ''} aria-current={view === key ? 'page' : undefined} onClick={() => changeView(key)}>{label}</button>)}
+        <a href="/calories/" className="cal-brand" aria-label={t('Calories home')}><span className="cal-brand-mark"><Icon name="leaf" size={22}/></span><span>calories<span className="cal-brand-dot">.</span></span></a>
+        <nav className="cal-nav" aria-label={t('Journal navigation')}>
+          {([['journal', 'Journal'], ['foods', 'Foods'], ['bank', 'Food bank'], ['summary', 'Summary']] as [View, string][]).map(([key, label]) => <button key={key} className={view === key ? 'is-active' : ''} aria-current={view === key ? 'page' : undefined} onClick={() => changeView(key)}>{t(label)}</button>)}
         </nav>
         <div className="cal-header-tools">
-          <span className={`cal-sync cal-sync-${saveState}`} role="status" aria-live="polite">{['saved', 'device', 'offline'].includes(saveState) ? <Icon name="check" size={13}/> : <span className="cal-status-dot"/>}<span>{saveState === 'saved' ? 'All saved' : saveState === 'error' ? 'Needs attention' : saveState === 'device' ? 'Saved on device' : saveState === 'offline' ? 'Offline · on device' : 'Saving…'}</span></span>
-          <button className="cal-icon-button" onClick={() => setModal({ type: 'transfer' })} title="Backup & import" aria-label="Backup and import"><Icon name="download"/></button>
-          <button className="cal-icon-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out" disabled={busy}><Icon name="logout"/></button>
+          <span className={`cal-sync cal-sync-${saveState}`} role="status" aria-live="polite">{['saved', 'device', 'offline'].includes(saveState) ? <Icon name="check" size={13}/> : <span className="cal-status-dot"/>}<span>{t(saveState === 'saved' ? 'All saved' : saveState === 'error' ? 'Needs attention' : saveState === 'device' ? 'Saved on device' : saveState === 'offline' ? 'Offline · on device' : 'Saving…')}</span></span>
+          <button className="cal-icon-button" onClick={() => setModal({ type: 'settings' })} title={t('Settings')} aria-label={t('Settings')}><Icon name="gear"/></button>
+          <button className="cal-icon-button" onClick={() => setModal({ type: 'transfer' })} title={t('Backup & import')} aria-label={t('Backup and import')}><Icon name="download"/></button>
+          <button className="cal-icon-button" onClick={() => void signOut()} title={t('Sign out')} aria-label={t('Sign out')} disabled={busy}><Icon name="logout"/></button>
         </div>
       </header>
 
-      {saveError && <div className="cal-save-alert" role="alert"><div><strong>Your latest changes haven’t synced.</strong><p>{saveError}</p></div><button className="cal-button cal-button-small" onClick={() => setModal({ type: 'transfer' })}>Export unsaved</button><button className="cal-text-button" onClick={() => void reloadSavedData()} disabled={busy || saving.current || refreshing.current}>Reload saved data</button></div>}
+      {saveError && <div className="cal-save-alert" role="alert"><div><strong>{t('Your latest changes haven’t synced.')}</strong><p>{saveError}</p></div><button className="cal-button cal-button-small" onClick={() => setModal({ type: 'transfer' })}>{t('Export unsaved')}</button><button className="cal-text-button" onClick={() => void reloadSavedData()} disabled={busy || saving.current || refreshing.current}>{t('Reload saved data')}</button></div>}
 
-      {(offline || saveState === 'device') && !saveError && <div className="cal-offline-notice" role="status"><div><strong>{offline ? 'Your journal is available offline.' : 'Saved on this device.'}</strong><p>{queue.current ? 'Your changes are kept here and will sync when a connection is available.' : 'Showing the journal and Garmin readings saved on this device.'} Photo reading needs a connection.</p></div><button className="cal-button cal-button-small" disabled={saveState === 'saving'} onClick={() => void flushSave()}><Icon name="refresh" size={16}/>Sync now</button></div>}
+      {(offline || saveState === 'device') && !saveError && <div className="cal-offline-notice" role="status"><div><strong>{t(offline ? 'Your journal is available offline.' : 'Saved on this device.')}</strong><p>{t(queue.current ? 'Your changes are kept here and will sync when a connection is available.' : 'Showing the journal and Garmin readings saved on this device.')} {t('Photo reading needs a connection.')}</p></div><button className="cal-button cal-button-small" disabled={saveState === 'saving'} onClick={() => void flushSave()}><Icon name="refresh" size={16}/>{t('Sync now')}</button></div>}
 
       <main className="cal-main">
         <DraftRecovery onResume={resumeFormDraft} notice={recoveryNotice}/>
         {view === 'journal' && <JournalView date={date} currentDay={currentDay} dayEntries={dayEntries} targets={targets} burned={burned} ledger={ledger} carryIn={carryIn} carryIsProvisional={carryIsProvisional} garmin={garmin} garminLoading={garminLoading} garminLoadError={garminLoadError} libraryIds={libraryIds} onOpenDay={openDay} onModal={setModal} onRemoveEntry={removeEntry}/>}
 
         {view === 'bank' && <>
-          <h1 className="cal-sr-only">Food bank</h1>
+          <h1 className="cal-sr-only">{t('Food bank')}</h1>
           <FoodBankView portions={data.foodBank} onPrepare={() => setModal({ type: 'bank-prepare' })} onEat={portion => setModal({ type: 'bank-consume', portion })} onRemove={id => void removeBankPortion(id)}/>
         </>}
 
@@ -603,11 +624,12 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
         {view === 'summary' && <SummaryView data={data} garminDays={garmin.days} currentDay={currentDay} ledger={ledger} entriesByDate={entriesByDate} trendsNotice={trendsNotice} onApplyDeficit={applyPlanDeficit} onOpenDay={openDay} onExport={() => setModal({ type: 'transfer' })}/>}
       </main>
 
-      {view === 'journal' && !modal && <button className={`cal-fab${undoNotice ? ' cal-fab-raised' : ''}`} onClick={() => setModal({ type: 'entry' })}><Icon name="plus" size={20}/>Log food</button>}
+      {view === 'journal' && !modal && <button className={`cal-fab${undoNotice ? ' cal-fab-raised' : ''}`} onClick={() => setModal({ type: 'entry' })}><Icon name="plus" size={20}/>{t('Log food')}</button>}
 
       {undoNotice && <UndoNotice id={undoNotice.action.id} message={undoNotice.message} active={!modal} onUndo={() => undoLatest(undoNotice.action, undoNotice.scope)} onDismiss={() => setUndoNotice(current => current?.action.id === undoNotice.action.id ? null : current)}/>}
 
-      {modal && <Modal onClose={() => setModal(null)} dismissOnBackdrop={modal.type === 'food-details' || modal.type === 'garmin'}><Suspense fallback={<div className="cal-loading" role="status"><span className="cal-spinner"/><p>Opening…</p></div>}>{modal.type === 'entry' ? <EntryEditor key={modal.entry?.id ?? modal.foodId ?? 'new-entry'} entry={modal.entry} initialFoodId={modal.foodId} initialMeal={modal.meal} lastQuantities={lastQuantities} recentFoodIds={recentIds ?? undefined} recentWindow={foodList.window} foods={sortedFoods} date={date} onSave={saveEntry} readMealPhoto={(input, signal) => client.estimateMealPhoto(input, signal)} onAddFood={() => setModal({ type: 'food', returnToLog: true })} onFoodBank={openFoodBank} bankCount={data.foodBank.length} onClose={() => setModal(null)}/>
+      {modal && <Modal onClose={() => setModal(null)} dismissOnBackdrop={modal.type === 'food-details' || modal.type === 'garmin' || modal.type === 'settings'}><Suspense fallback={<div className="cal-loading" role="status"><span className="cal-spinner"/><p>{t('Opening…')}</p></div>}>{modal.type === 'settings' ? <SettingsDialog language={language} onLanguage={next => void changeLanguage(next)} onClose={() => setModal(null)}/>
+        : modal.type === 'entry' ? <EntryEditor key={modal.entry?.id ?? modal.foodId ?? 'new-entry'} entry={modal.entry} initialFoodId={modal.foodId} initialMeal={modal.meal} lastQuantities={lastQuantities} recentFoodIds={recentIds ?? undefined} recentWindow={foodList.window} foods={sortedFoods} date={date} onSave={saveEntry} readMealPhoto={(input, signal) => client.estimateMealPhoto(input, signal)} onAddFood={() => setModal({ type: 'food', returnToLog: true })} onFoodBank={openFoodBank} bankCount={data.foodBank.length} onClose={() => setModal(null)}/>
         : modal.type === 'food-details' ? <FoodDetails food={data.foods.find(food => food.id === modal.food.id) ?? modal.food} entries={data.entries} currentDay={currentDay} onOpenDay={day => { setModal(null); openDay(day); }} onLog={() => setModal({ type: 'entry', foodId: modal.food.id })} onClose={() => setModal(null)}/>
         : modal.type === 'food' ? <FoodEditor key={modal.food?.id ?? 'new-food'} food={modal.food} readPhotos={(input, signal) => client.readFoodPhotos(input, signal)} onSave={saveFood} onClose={() => setModal(null)}/>
         : modal.type === 'bank-prepare' ? <FoodBankEditor foods={sortedFoods} onSave={saveBankPortions} onClose={() => setModal(null)}/>
@@ -622,7 +644,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
           setModal(null);
         }} onClose={() => setModal(null)}/>
         : modal.type === 'garmin' ? <GarminConnection date={date} currentDay={currentDay} snapshot={garmin} loading={garminLoading || garminDisconnecting} disconnecting={garminDisconnecting} error={garminLoadError} onRefresh={() => void refreshGarmin(true)} onDisconnect={() => void disconnectGarmin()} onClose={() => setModal(null)}/>
-        : <TransferDialog data={queue.current ?? data} onImport={async (next) => { if (!(await updateData(() => next))) throw new Error('The backup could not be saved on this device.'); setUndoNotice(null); setModal(null); }} onClose={() => setModal(null)}/>}</Suspense></Modal>}
+        : <TransferDialog data={queue.current ?? data} onImport={async (next) => { if (!(await updateData(() => next))) throw new Error(t('The backup could not be saved on this device.')); setUndoNotice(null); setModal(null); }} onClose={() => setModal(null)}/>}</Suspense></Modal>}
     </FormDraftProvider>}
   </div>;
 }
@@ -630,7 +652,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
 function DraftRecovery({ onResume, notice }: { onResume: (draft: FormDraftSummary) => void; notice: string }) {
   const { drafts, discard } = useFormDrafts();
   if (!drafts.length) return null;
-  return <section className="cal-draft-recovery" aria-label="Unfinished drafts"><div><strong>Unfinished forms</strong><p>Saved on this device.</p></div>{notice && <p role="status">{notice}</p>}<ul>{drafts.map(draft => <li key={draft.key}><span>{draft.label}</span><div><button className="cal-text-button" onClick={() => onResume(draft)}>Resume<span className="cal-sr-only"> {draft.label}</span></button><button className="cal-icon-button" onClick={() => discard(draft.key)} aria-label={`Discard ${draft.label} draft`}><Icon name="close" size={16}/></button></div></li>)}</ul></section>;
+  return <section className="cal-draft-recovery" aria-label={t('Unfinished drafts')}><div><strong>{t('Unfinished forms')}</strong><p>{t('Saved on this device.')}</p></div>{notice && <p role="status">{notice}</p>}<ul>{drafts.map(draft => <li key={draft.key}><span>{draft.label}</span><div><button className="cal-text-button" onClick={() => onResume(draft)}>{t('Resume')}<span className="cal-sr-only"> {draft.label}</span></button><button className="cal-icon-button" onClick={() => discard(draft.key)} aria-label={t('Discard {name} draft', { name: draft.label })}><Icon name="close" size={16}/></button></div></li>)}</ul></section>;
 }
 
 function Setup({ onConfigure }: { onConfigure: (config: { url: string; key: string; email?: string }) => void }) {
@@ -642,7 +664,7 @@ function Setup({ onConfigure }: { onConfigure: (config: { url: string; key: stri
     try { onConfigure({ url: url.trim(), key: key.trim() }); }
     catch (error) { setError(errorMessage(error)); }
   }
-  return <div className="cal-auth-card cal-setup-card"><h1>Connect storage</h1><p className="cal-auth-intro">Your journal uses your Supabase project to keep your iPhone and Mac in sync.</p><div className="cal-setup-guide"><Icon name="book" size={19}/><div><strong>Set up your project first</strong><p>Follow the short guide to create your database and personal account.</p><a href="/calories/setup/" target="_blank" rel="noreferrer">Open setup guide ↗</a></div></div><form className="cal-form" onSubmit={submit}><label>Supabase project URL<input type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="https://your-project.supabase.co" autoComplete="off" autoCapitalize="none" spellCheck={false} required/></label><label>Publishable / anon key<textarea value={key} onChange={event => setKey(event.target.value)} placeholder="Paste your public project key" spellCheck={false} required rows={3}/><small className="cal-field-hint">Use only the public publishable or anon key. Never use a service-role or secret key.</small></label>{error && <p className="cal-form-error" role="alert">{error}</p>}<button className="cal-button cal-button-primary cal-button-full">Connect journal<Icon name="arrow" size={18}/></button></form><p className="cal-setup-note">Connection details are saved on this device. Your account password protects access to your data.</p></div>;
+  return <div className="cal-auth-card cal-setup-card"><h1>{t('Connect storage')}</h1><p className="cal-auth-intro">{t('Your journal uses your Supabase project to keep your iPhone and Mac in sync.')}</p><div className="cal-setup-guide"><Icon name="book" size={19}/><div><strong>{t('Set up your project first')}</strong><p>{t('Follow the short guide to create your database and personal account.')}</p><a href="/calories/setup/" target="_blank" rel="noreferrer">{t('Open setup guide ↗')}</a></div></div><form className="cal-form" onSubmit={submit}><label>{t('Supabase project URL')}<input type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="https://your-project.supabase.co" autoComplete="off" autoCapitalize="none" spellCheck={false} required/></label><label>{t('Publishable / anon key')}<textarea value={key} onChange={event => setKey(event.target.value)} placeholder={t('Paste your public project key')} spellCheck={false} required rows={3}/><small className="cal-field-hint">{t('Use only the public publishable or anon key. Never use a service-role or secret key.')}</small></label>{error && <p className="cal-form-error" role="alert">{error}</p>}<button className="cal-button cal-button-primary cal-button-full">{t('Connect journal')}<Icon name="arrow" size={18}/></button></form><p className="cal-setup-note">{t('Connection details are saved on this device. Your account password protects access to your data.')}</p></div>;
 }
 
 /** A tap outside closes only read-only dialogs; forms close with Cancel, Escape or Back, so a stray tap never discards one. */
@@ -658,3 +680,17 @@ function Modal({ children, onClose, dismissOnBackdrop = false }: { children: Rea
   return <dialog className="cal-dialog" aria-labelledby="cal-dialog-title" ref={dialog} onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={event => { if (dismissOnBackdrop && event.target === dialog.current) { const rect = dialog.current.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}><div className="cal-modal-content">{children}</div></dialog>;
 }
 
+
+function LanguagePicker({ language, onChange, compact = false }: { language: Language; onChange: (language: Language) => void; compact?: boolean }) {
+  return <div className={`cal-entry-mode-switch cal-language-switch${compact ? ' cal-language-compact' : ''}`} role="group" aria-label={t('Language')}>{LANGUAGES.map(option => <button key={option} type="button" lang={option} className={language === option ? 'is-active' : ''} aria-pressed={language === option} onClick={() => onChange(option)}>{LANGUAGE_NAMES[option]}</button>)}</div>;
+}
+
+function SettingsDialog({ language, onLanguage, onClose }: { language: Language; onLanguage: (language: Language) => void; onClose: () => void }) {
+  return <>
+    <ModalHeader title={t('Settings')} eyebrow={t('SETTINGS')} onClose={onClose}/>
+    <div className="cal-form">
+      <div className="cal-settings-row"><strong>{t('Language')}</strong><p className="cal-field-hint">{t('Saved with your journal, so your other devices switch too.')}</p><LanguagePicker language={language} onChange={onLanguage}/></div>
+    </div>
+    <div className="cal-modal-actions"><button className="cal-button cal-button-primary" type="button" onClick={onClose}>{t('Done')}</button></div>
+  </>;
+}

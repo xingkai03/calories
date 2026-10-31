@@ -639,3 +639,10 @@
   .cal-library-bar > .cal-button { width: 100%; }
   .cal-main { padding-bottom: 88px; }
 }
+
+/* Language choice: in Settings, and below the sign-in card. */
+.cal-settings-row { display: grid; gap: 8px; }
+.cal-settings-row > strong { font-size: 14px; }
+.cal-settings-row .cal-field-hint { margin: 0; }
+.cal-language-compact { width: 100%; max-width: 260px; margin: 18px auto 0; }
+.cal-language-compact > button { min-height: 40px; padding: 8px 10px; }

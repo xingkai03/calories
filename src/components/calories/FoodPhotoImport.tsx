@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { type FoodPhotoDraft, type FoodPhotoRequest } from '../../lib/calories/food-photos';
 import { PhotoPreparationError, prepareFoodPhoto, type PreparedFoodPhoto } from '../../lib/calories/prepare-photo';
+import { t, translateMessage } from '../../lib/calories/i18n';
 
 interface FoodPhotoImportProps {
   readPhotos: (input: FoodPhotoRequest, signal: AbortSignal) => Promise<FoodPhotoDraft>;
@@ -82,7 +83,7 @@ export default function FoodPhotoImport({ readPhotos, onDraft, onBusyChange }: F
       setSlots(current => ({ ...current, [slot]: { photo: { ...prepared, filename: file.name, preview }, preparing: false, error: '' } }));
     } catch (caught) {
       if (!mounted.current || controller.signal.aborted || slotVersions.current[slot] !== version) return;
-      const message = caught instanceof PhotoPreparationError ? caught.message : 'This photo couldn’t be prepared. Try a JPEG or PNG photo, or enter the food details below.';
+      const message = caught instanceof PhotoPreparationError ? translateMessage(caught.message) : t('This photo couldn’t be prepared. Try a JPEG or PNG photo, or enter the food details below.');
       setSlots(current => ({ ...current, [slot]: { photo: null, preparing: false, error: message } }));
     } finally {
       if (preparations.current[slot] === controller) delete preparations.current[slot];
@@ -102,10 +103,10 @@ export default function FoodPhotoImport({ readPhotos, onDraft, onBusyChange }: F
       const draft = await readPhotos({ product: product.image, nutrition: nutrition.image }, controller.signal);
       if (!mounted.current || controller.signal.aborted || requestVersion.current !== version) return;
       onDraft(draft);
-      setNotice('Form filled.');
+      setNotice(t('Form filled.'));
     } catch (caught) {
       if (!mounted.current || controller.signal.aborted || requestVersion.current !== version) return;
-      setError(caught instanceof Error && caught.message && caught.message.length <= 500 ? caught.message : 'Couldn’t read these photos. Check your connection and try again, or enter the food details below.');
+      setError(caught instanceof Error && caught.message && caught.message.length <= 500 ? translateMessage(caught.message) : t('Couldn’t read these photos. Check your connection and try again, or enter the food details below.'));
     } finally {
       if (mounted.current && requestVersion.current === version) {
         request.current = null;
@@ -114,7 +115,7 @@ export default function FoodPhotoImport({ readPhotos, onDraft, onBusyChange }: F
     }
   }
 
-  return <section className="cal-photo-import" aria-label="Fill from photos">
+  return <section className="cal-photo-import" aria-label={t('Fill from photos')}>
     <div className="cal-photo-grid">
       {photoSlots.map(slot => {
         const { photo, preparing, error: slotError } = slots[slot];
@@ -122,15 +123,15 @@ export default function FoodPhotoImport({ readPhotos, onDraft, onBusyChange }: F
         return <div className="cal-photo-card" key={slot}>
           <label className="cal-photo-choose" htmlFor={inputId} title={photo?.filename}>
             {photo ? <img src={photo.preview} alt=""/> : preparing ? <span className="cal-photo-spinner" aria-hidden="true"/> : <PhotoIcon/>}
-            <span>{slot === 'product' ? 'Product photo' : 'Nutrition table'}</span>
-            <input id={inputId} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" aria-label={slotLabels[slot]} aria-describedby={slotError ? `${inputId}-error` : undefined} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void selectPhoto(slot, file); }}/>
+            <span>{t(slot === 'product' ? 'Product photo' : 'Nutrition table')}</span>
+            <input id={inputId} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" aria-label={t(slotLabels[slot])} aria-describedby={slotError ? `${inputId}-error` : undefined} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void selectPhoto(slot, file); }}/>
           </label>
-          {(photo || preparing) && <button className="cal-photo-remove" type="button" onClick={() => clearSlot(slot)} aria-label={`Remove ${slotLabels[slot].toLowerCase()}`}><span aria-hidden="true">×</span></button>}
+          {(photo || preparing) && <button className="cal-photo-remove" type="button" onClick={() => clearSlot(slot)} aria-label={t(slot === 'product' ? 'Remove product photo' : 'Remove nutrition table photo')}><span aria-hidden="true">×</span></button>}
           {slotError && <p className="cal-photo-error" id={`${inputId}-error`} role="alert">{slotError}</p>}
         </div>;
       })}
     </div>
-    <div className="cal-photo-actions"><button className="cal-button cal-button-small cal-photo-fill" type="button" onClick={() => void fillFromPhotos()} disabled={!slots.product.photo || !slots.nutrition.photo || busy}>{reading && <span className="cal-photo-spinner" aria-hidden="true"/>}{reading ? 'Reading photos…' : 'Fill from photos'}</button>{reading && <button className="cal-text-button" type="button" onClick={() => cancelReading('Cancelled.')}>Cancel</button>}<span className="cal-photo-status" role="status">{busy ? reading ? '' : 'Preparing…' : notice}</span></div>
+    <div className="cal-photo-actions"><button className="cal-button cal-button-small cal-photo-fill" type="button" onClick={() => void fillFromPhotos()} disabled={!slots.product.photo || !slots.nutrition.photo || busy}>{reading && <span className="cal-photo-spinner" aria-hidden="true"/>}{t(reading ? 'Reading photos…' : 'Fill from photos')}</button>{reading && <button className="cal-text-button" type="button" onClick={() => cancelReading(t('Cancelled.'))}>{t('Cancel')}</button>}<span className="cal-photo-status" role="status">{busy ? reading ? '' : t('Preparing…') : notice}</span></div>
     {error && <p className="cal-photo-error" role="alert">{error}</p>}
   </section>;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { t, translateMessage } from '../../lib/calories/i18n';
 import './undo.css';
 
 export interface UndoNoticeProps {
@@ -107,7 +108,7 @@ export function UndoNotice({ id, message, onUndo, onDismiss, durationMs = 20000,
       if (mounted.current && latest.current.generation === startedGeneration) latest.current.onDismiss();
     } catch (caught) {
       if (!mounted.current || latest.current.generation !== startedGeneration) return;
-      const detail = caught instanceof Error && caught.message.trim() && caught.message.length <= 500 ? caught.message : 'Couldn’t undo this action. Try again.';
+      const detail = caught instanceof Error && caught.message.trim() && caught.message.length <= 500 ? translateMessage(caught.message) : t('Couldn’t undo this action. Try again.');
       const nextFailure = { generation: startedGeneration, message: detail };
       failureRef.current = nextFailure;
       setFailure(nextFailure);
@@ -118,9 +119,9 @@ export function UndoNotice({ id, message, onUndo, onDismiss, durationMs = 20000,
   }
 
   if (!active) return null;
-  return <aside className={`cal-undo-notice${displayedError ? ' cal-undo-has-error' : ''}`} aria-label="Undo recent action" aria-busy={working} onPointerEnter={() => { interaction.current.hovered = true; stop(); setHovered(true); }} onPointerLeave={() => { interaction.current.hovered = false; setHovered(false); }} onFocusCapture={() => { interaction.current.focused = true; stop(); setFocused(true); }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { interaction.current.focused = false; setFocused(false); } }}>
+  return <aside className={`cal-undo-notice${displayedError ? ' cal-undo-has-error' : ''}`} aria-label={t('Undo recent action')} aria-busy={working} onPointerEnter={() => { interaction.current.hovered = true; stop(); setHovered(true); }} onPointerLeave={() => { interaction.current.hovered = false; setHovered(false); }} onFocusCapture={() => { interaction.current.focused = true; stop(); setFocused(true); }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { interaction.current.focused = false; setFocused(false); } }}>
     <div className="cal-undo-content"><p className="cal-undo-message" role="status" aria-live="polite" aria-atomic="true">{message}</p>{displayedError && <p className="cal-undo-error" role="status" aria-live="polite">{displayedError}</p>}</div>
-    <div className="cal-undo-actions"><button className="cal-undo-button" type="button" onClick={() => void undo()} disabled={working}>{working ? 'Undoing…' : 'Undo'}</button><button className="cal-undo-dismiss" type="button" onClick={onDismiss} disabled={working} aria-label="Dismiss undo notice"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
+    <div className="cal-undo-actions"><button className="cal-undo-button" type="button" onClick={() => void undo()} disabled={working}>{t(working ? 'Undoing…' : 'Undo')}</button><button className="cal-undo-dismiss" type="button" onClick={onDismiss} disabled={working} aria-label={t('Dismiss undo notice')}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
   </aside>;
 }
 

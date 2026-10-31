@@ -11,16 +11,21 @@ declare
   fresh_session uuid := gen_random_uuid();
   old_session uuid := gen_random_uuid();
   expired_session uuid := gen_random_uuid();
+  member_uuid uuid := gen_random_uuid();
+  member_session uuid := gen_random_uuid();
 begin
-  select (regexp_match(
-    pg_get_constraintdef(oid),
-    '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-  ))[1]::uuid into owner_uuid
-  from pg_constraint
-  where conrelid = 'public.calories_state'::regclass
-    and conname = 'calories_state_single_owner';
+  if to_regclass('private.calories_members') is null then
+    raise exception 'Run the latest setup.sql first.';
+  end if;
+  select user_id into owner_uuid from private.calories_members order by added_at, user_id limit 1;
   if owner_uuid is null then
     raise exception 'Run setup.sql with your owner UUID first.';
+  end if;
+  if has_table_privilege('authenticated', 'private.calories_members', 'SELECT')
+    or has_table_privilege('authenticated', 'private.calories_members', 'INSERT')
+    or has_table_privilege('authenticated', 'private.calories_members', 'UPDATE')
+    or has_table_privilege('authenticated', 'private.calories_members', 'DELETE') then
+    raise exception 'Browser role must not read or change the member list.';
   end if;
   if not (select relrowsecurity from pg_class where oid = 'public.calories_state'::regclass) then
     raise exception 'Row Level Security must be enabled.';
@@ -41,7 +46,14 @@ begin
   perform set_config('calories.test_fresh_session', fresh_session::text, true);
   perform set_config('calories.test_old_session', old_session::text, true);
   perform set_config('calories.test_expired_session', expired_session::text, true);
+  perform set_config('calories.test_member', member_uuid::text, true);
+  perform set_config('calories.test_member_session', member_session::text, true);
+  -- A temporary second member, removed by the final rollback.
+  insert into auth.users (id, aud, role, email) values
+    (member_uuid, 'authenticated', 'authenticated', 'calories-verify-' || member_uuid || '@example.invalid');
+  insert into private.calories_members (user_id) values (member_uuid);
   insert into auth.sessions (id, user_id, created_at, updated_at, aal, not_after) values
+    (member_session, member_uuid, now(), now(), 'aal1', null),
     (fresh_session, owner_uuid, now(), now(), 'aal1', null),
     (old_session, owner_uuid, now() - interval '30 days', now(), 'aal1', null),
     (expired_session, owner_uuid, now(), now(), 'aal1', now() - interval '1 second');
@@ -83,7 +95,7 @@ begin
     raise exception 'Fresh conditional save must update once and advance the revision.';
   end if;
   if (select count(*) from public.calories_state) <> 1 then
-    raise exception 'The approved owner should see exactly one state row.';
+    raise exception 'The approved owner should see exactly their own state row.';
   end if;
 
   update public.calories_state set data = '{"verification":"stale"}'::jsonb
@@ -114,6 +126,65 @@ begin
     raise exception 'State unexpectedly accepted a JSON array.';
   exception when check_violation then null;
   end;
+end;
+$$;
+
+-- A second member gets a separate journal and cannot reach the owner's.
+select set_config('request.jwt.claims', jsonb_build_object(
+  'sub', current_setting('calories.test_member'),
+  'role', 'authenticated',
+  'session_id', current_setting('calories.test_member_session')
+)::text, true);
+
+do $$
+declare
+  member_uuid uuid := current_setting('calories.test_member')::uuid;
+  owner_uuid uuid := current_setting('calories.test_owner')::uuid;
+  affected integer;
+begin
+  if not public.calories_access_allowed() then
+    raise exception 'An approved member should have access.';
+  end if;
+  if (select count(*) from public.calories_state) <> 0 then
+    raise exception 'A new member must not see anyone else''s journal.';
+  end if;
+  insert into public.calories_state (user_id, data) values (member_uuid, '{"verification":"member"}'::jsonb);
+  if (select count(*) from public.calories_state) <> 1
+    or (select user_id from public.calories_state) <> member_uuid then
+    raise exception 'A member should see only their own journal.';
+  end if;
+  update public.calories_state set data = '{}'::jsonb where user_id = owner_uuid;
+  get diagnostics affected = row_count;
+  if affected <> 0 then raise exception 'A member unexpectedly changed the owner''s journal.'; end if;
+  begin
+    insert into public.calories_state (user_id, data) values (owner_uuid, '{}'::jsonb);
+    raise exception 'A member unexpectedly wrote a row for another account.';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from private.calories_members;
+    raise exception 'A member unexpectedly read the member list.';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into private.calories_members (user_id) values (gen_random_uuid());
+    raise exception 'A member unexpectedly approved another account.';
+  exception when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+-- Removing a member revokes access immediately, without deleting their journal.
+reset role;
+delete from private.calories_members where user_id = current_setting('calories.test_member')::uuid;
+set local role authenticated;
+do $$
+begin
+  if public.calories_access_allowed() or (select count(*) from public.calories_state) <> 0 then
+    raise exception 'A removed member unexpectedly kept access.';
+  end if;
+  update public.calories_state set data = '{}'::jsonb;
+  if found then raise exception 'A removed member unexpectedly wrote data.'; end if;
 end;
 $$;
 

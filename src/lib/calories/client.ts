@@ -1,6 +1,6 @@
 import { emptyData, normalizeData, type TrackerData } from './model.ts';
 import { deployedConfiguration } from './config.ts';
-import { normalizeGarminSnapshot, type GarminSnapshot } from './garmin.ts';
+import { emptyGarminSnapshot, normalizeGarminSnapshot, type GarminSnapshot } from './garmin.ts';
 import { normalizeFoodPhotoDraft, normalizeFoodPhotoRequest, type FoodPhotoDraft, type FoodPhotoRequest } from './food-photos.ts';
 import { normalizeMealPhotoDraft, normalizeMealPhotoRequest, type MealPhotoDraft, type MealPhotoRequest } from './meal-photos.ts';
 import { withMealPhotoDeadline } from './meal-photo-deadline.ts';
@@ -164,7 +164,7 @@ export function createClient(options: ClientOptions = {}) {
     const body = await response.json().catch(() => ({}));
     if (response.status === 429) return new Error('Too many sign-in attempts. Please wait a moment and try again.');
     if (body.code === '42P01' || body.code === 'PGRST205') return new Error('Storage setup is incomplete. Run the Calories SQL setup in your Supabase project.');
-    if (response.status === 401 || response.status === 403 || body.code === '42501') return new Error('Access was denied. Check your email/password and the owner account in the storage setup.');
+    if (response.status === 401 || response.status === 403 || body.code === '42501') return new Error('Access was denied. Check your email/password and that this account is approved in the storage setup.');
     return new Error(body.error_description || body.msg || body.message || 'Your storage request failed. Please try again.');
   }
   async function readStorageJson(response: Response): Promise<any> {
@@ -262,7 +262,7 @@ export function createClient(options: ClientOptions = {}) {
       if (access.status >= 500 || access.status === 429) throw new RecoverableNetworkError();
       throw await errorFor(access);
     }
-    if (await readStorageJson(access) !== true) { clearSession(); throw new Error('This account does not have access, or its 30-day session has expired. Sign in again with the owner account.'); }
+    if (await readStorageJson(access) !== true) { clearSession(); throw new Error('This account does not have access, or its 30-day session has expired. Sign in again with an approved account.'); }
     const row = `/rest/v1/calories_state?user_id=eq.${encodeURIComponent(current.userId)}`;
     if (known?.revision) {
       const rows = await storageRows(await authenticated(`${row}&select=revision`));
@@ -538,14 +538,16 @@ export function createClient(options: ClientOptions = {}) {
         throw await errorFor(response);
       }
       const rows = await readStorageJson(response);
-      if (!Array.isArray(rows) || rows.length !== 1) throw new Error('Garmin storage setup is incomplete, or access has expired.');
+      if (!Array.isArray(rows) || rows.length > 1) throw new Error('Garmin storage setup is incomplete, or access has expired.');
+      // Garmin import is set up for the project owner only. Other approved accounts have no status row, so show them as not connected.
+      const status = rows.length === 1 ? rows[0] : emptyGarminSnapshot().status;
       let merged = days;
       if (saved && since) {
         const byDate = new Map<string, unknown>(saved.days.map(day => [day.date, day]));
         for (const day of days) byDate.set(String((day as { date?: unknown } | null)?.date), day);
         merged = [...byDate.values()];
       }
-      const snapshot = normalizeGarminSnapshot({ days: merged, status: rows[0] });
+      const snapshot = normalizeGarminSnapshot({ days: merged, status });
       try {
         const stillCurrent = storedSession();
         if (stillCurrent && stillCurrent.userId === current.userId && stillCurrent.deadline === current.deadline && current.deadline > now()) await store?.set([[garminKey(current.userId), { deadline: current.deadline, snapshot }]]);

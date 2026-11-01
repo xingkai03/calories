@@ -5,9 +5,11 @@ export type FoodState = 'Raw' | 'Cooked' | 'As served';
 export interface Macros { carbs: number; protein: number; fat: number; fiber: number; calories: number }
 /** pieceWeight is the weight (g) or volume (ml) of one piece, so a gram or millilitre food can also be logged by the piece. */
 export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState; pieceWeight?: number }
-/** quantity is always in unit; pieces records how many pieces it was when logged by the piece. */
-export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; pieces?: number; source?: 'manual' }
-export type BankItem = Omit<Entry, 'date' | 'meal' | 'source'>;
+/** quantity is always in unit; pieces records how many pieces it was when logged by the piece.
+ * bankPortion records the food-bank portion an entry was eaten from, so removing it returns it to the bank. */
+export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; pieces?: number; source?: 'manual'; bankPortion?: BankOrigin }
+export interface BankOrigin { id: string; name: string }
+export type BankItem = Omit<Entry, 'date' | 'meal' | 'source' | 'bankPortion'>;
 export interface BankPortion { id: string; name: string; items: BankItem[] }
 export interface ManualMealInput { id: string; date: string; meal: string; name: string; carbs: number; protein: number; fat: number; fiber: number }
 /** activeEstimate is the user's guess at today's full-day active calories; it only counts while that day is in progress. */
@@ -114,6 +116,12 @@ export function isCalendarDate(value: string): boolean {
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   return month >= 1 && month <= 12 && day >= 1 && day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
 }
+function bankOrigin(value: unknown): { bankPortion?: BankOrigin } {
+  if (value === undefined) return {};
+  const origin = record(value);
+  return { bankPortion: { id: text(origin.id, 'food-bank portion ID'), name: text(origin.name, 'food-bank portion name') } };
+}
+
 function date(value: unknown): string {
   const s = text(value, 'date', 10);
   if (!isCalendarDate(s)) throw new Error('Invalid date.');
@@ -171,7 +179,7 @@ export function normalizeData(raw: unknown): TrackerData {
     // Older open tabs omit new metadata on save; the canonical identity preserves manual editing.
     const manual = e.source === 'manual' || foodId === `manual:${id}`;
     const entryUnit = unit(e.unit);
-    return { id, date: date(e.date), meal: text(e.meal, 'meal'), foodId, foodName: text(e.foodName, 'food name'), quantity: number(e.quantity, 'quantity', true), unit: entryUnit, state: state(e.state), ...pieces(e.pieces, entryUnit), ...macros(e), ...(manual ? { source: 'manual' as const } : {}) };
+    return { id, date: date(e.date), meal: text(e.meal, 'meal'), foodId, foodName: text(e.foodName, 'food name'), quantity: number(e.quantity, 'quantity', true), unit: entryUnit, state: state(e.state), ...pieces(e.pieces, entryUnit), ...macros(e), ...(manual ? { source: 'manual' as const } : {}), ...bankOrigin(e.bankPortion) };
   });
   if (new Set(foods.map(f => f.id)).size !== foods.length || new Set(entries.map(e => e.id)).size !== entries.length) throw new Error('The backup contains duplicate IDs.');
   const itemIds = new Set(entries.map(entry => entry.id));
@@ -184,7 +192,7 @@ export function normalizeData(raw: unknown): TrackerData {
     if (!Array.isArray(portion.items) || portion.items.length < 1 || portion.items.length > 50) throw new Error('A food-bank portion must contain 1 to 50 ingredients.');
     const items: BankItem[] = Array.from(portion.items).map(rawItem => {
       const item = record(rawItem);
-      if (item.date !== undefined || item.meal !== undefined || item.source !== undefined) throw new Error('Invalid food-bank ingredient metadata.');
+      if (item.date !== undefined || item.meal !== undefined || item.source !== undefined || item.bankPortion !== undefined) throw new Error('Invalid food-bank ingredient metadata.');
       const itemId = text(item.id, 'food-bank ingredient ID');
       if (itemIds.has(itemId)) throw new Error('The backup contains duplicate IDs.');
       itemIds.add(itemId);

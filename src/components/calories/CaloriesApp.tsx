@@ -6,7 +6,7 @@ import { DAILY_PROTEIN_GRAMS } from '../../lib/calories/nutrition';
 import { calorieLedger, carryBefore } from '../../lib/calories/budget';
 import { rankFoods } from '../../lib/calories/food-order';
 import { FoodBankView, FoodBankEditor, FoodBankConsume } from './FoodBank';
-import { addPreparedPortions, consumeFoodBankPortion } from '../../lib/calories/food-bank';
+import { addPreparedPortions, consumeFoodBankPortion, removeJournalEntry } from '../../lib/calories/food-bank';
 import { FormDraftProvider, useFormDrafts, clearFormDrafts } from './FormDrafts';
 import type { FormDraftSummary } from '../../lib/calories/form-drafts';
 import { assertCurrentRecord } from '../../lib/calories/draft-conflicts';
@@ -443,7 +443,10 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   }
 
   async function removeEntry(id: string) {
-    await updateWithUndo('delete-entry', id, current => ({ ...current, entries: current.entries.filter(entry => entry.id !== id) }), before => t('Removed {name}.', { name: before.entries.find(entry => entry.id === id)?.foodName ?? t('entry') }));
+    await updateWithUndo('delete-entry', id, current => removeJournalEntry(current, id), before => {
+      const entry = before.entries.find(item => item.id === id);
+      return entry?.bankPortion ? t('Returned {name} to the food bank.', { name: entry.foodName }) : t('Removed {name}.', { name: entry?.foodName ?? t('entry') });
+    });
   }
 
   function removeFood(id: string): Promise<boolean> {
@@ -498,8 +501,11 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
 
   async function saveEntry(entry: Entry, originalRecordJson: string) {
     if (!(await updateData(current => {
-      assertCurrentRecord(current.entries.find(item => item.id === entry.id) ?? null, originalRecordJson, entry, 'this journal entry');
-      return { ...current, days: { ...current.days, [entry.date]: settingsForDay(current, entry.date) }, entries: current.entries.some(item => item.id === entry.id) ? current.entries.map(item => item.id === entry.id ? entry : item) : [...current.entries, entry] };
+      const saved = current.entries.find(item => item.id === entry.id) ?? null;
+      assertCurrentRecord(saved, originalRecordJson, entry, 'this journal entry');
+      // An entry eaten from the food bank still goes back there when removed, unless it was changed to another food.
+      const next = saved?.bankPortion && saved.foodId === entry.foodId ? { ...entry, bankPortion: saved.bankPortion } : entry;
+      return { ...current, days: { ...current.days, [entry.date]: settingsForDay(current, entry.date) }, entries: saved ? current.entries.map(item => item.id === entry.id ? next : item) : [...current.entries, entry] };
     }))) throw new Error(lastLocalError.current);
     setModal(null);
   }

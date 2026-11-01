@@ -1,5 +1,5 @@
 import { emptyData, normalizeData, type BankPortion, type DaySettings, type Entry, type Food, type TrackerData } from './model.ts';
-import { consumeFoodBankPortion } from './food-bank.ts';
+import { bankItemFromEntry, consumeFoodBankPortion, removeJournalEntry } from './food-bank.ts';
 import { journalEqual } from './offline.ts';
 
 export type UndoKind = 'delete-entry' | 'delete-food' | 'delete-bank' | 'consume-bank';
@@ -35,7 +35,7 @@ export function createUndoAction(beforeRaw: TrackerData, afterRaw: TrackerData, 
     const index = before.entries.findIndex(entry => entry.id === recordId), record = before.entries[index];
     if (!record) throw invalid();
     receipt = { ...base, kind, index, record };
-    expected = { ...before, entries: before.entries.filter(entry => entry.id !== recordId) };
+    expected = removeJournalEntry(before, recordId);
   } else if (kind === 'delete-food') {
     const index = before.foods.findIndex(food => food.id === recordId), record = before.foods[index];
     if (!record) throw invalid();
@@ -89,8 +89,16 @@ export function undoAction(currentRaw: TrackerData, rawReceipt: UndoAction): Tra
   if (receipt.kind === 'delete-entry') {
     const existing = current.entries.find(entry => entry.id === receipt.recordId);
     if (existing) { if (journalEqual(existing, receipt.record)) return current; throw new UndoConflictError(); }
-    if (current.foodBank.some(portion => portion.items.some(item => item.id === receipt.recordId))) throw new UndoConflictError();
-    return normalizeData({ ...current, entries: insert(current.entries, receipt.record, receipt.index) });
+    const holder = current.foodBank.find(portion => portion.items.some(item => item.id === receipt.recordId));
+    let foodBank = current.foodBank;
+    if (holder) {
+      // Removing an entry eaten from the bank put it back there; Undo takes it out again if it is still unchanged.
+      const returned = holder.items.find(item => item.id === receipt.recordId);
+      if (holder.id !== receipt.record.bankPortion?.id || !journalEqual(returned, bankItemFromEntry(receipt.record))) throw new UndoConflictError();
+      const items = holder.items.filter(item => item.id !== receipt.recordId);
+      foodBank = items.length ? current.foodBank.map(portion => portion === holder ? { ...portion, items } : portion) : current.foodBank.filter(portion => portion !== holder);
+    }
+    return normalizeData({ ...current, foodBank, entries: insert(current.entries, receipt.record, receipt.index) });
   }
   if (receipt.kind === 'delete-food') {
     const existing = current.foods.find(food => food.id === receipt.recordId);

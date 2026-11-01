@@ -10,7 +10,10 @@ export interface Food extends Macros { id: string; name: string; baseQuantity: n
 export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; pieces?: number; source?: 'manual'; bankPortion?: BankOrigin }
 export interface BankOrigin { id: string; name: string }
 export type BankItem = Omit<Entry, 'date' | 'meal' | 'source' | 'bankPortion'>;
-export interface BankPortion { id: string; name: string; items: BankItem[] }
+/** A food-bank item kept by weight: its items are the whole batch, and eating takes grams from what is left. */
+export interface BankWeight { total: number; left: number }
+/** weight is absent for a ready-made portion, eaten whole; present for a batch kept by weight. */
+export interface BankPortion { id: string; name: string; items: BankItem[]; weight?: BankWeight }
 export interface ManualMealInput { id: string; date: string; meal: string; name: string; carbs: number; protein: number; fat: number; fiber: number }
 /** activeEstimate is the user's guess at today's full-day active calories; it only counts while that day is in progress. */
 export interface DaySettings { burned: number; deficit: number; protein: number; burnedSource?: 'manual' | 'garmin'; activeEstimate?: number }
@@ -122,6 +125,14 @@ function bankOrigin(value: unknown): { bankPortion?: BankOrigin } {
   return { bankPortion: { id: text(origin.id, 'food-bank portion ID'), name: text(origin.name, 'food-bank portion name') } };
 }
 
+function bankWeight(value: unknown): { weight?: BankWeight } {
+  if (value === undefined) return {};
+  const weight = record(value);
+  const total = number(weight.total, 'food-bank total weight', true), left = number(weight.left, 'food-bank weight left', true);
+  if (left > total) throw new Error('Invalid food-bank weight: more is left than was stored.');
+  return { weight: { total, left } };
+}
+
 function date(value: unknown): string {
   const s = text(value, 'date', 10);
   if (!isCalendarDate(s)) throw new Error('Invalid date.');
@@ -199,7 +210,7 @@ export function normalizeData(raw: unknown): TrackerData {
       const itemUnit = unit(item.unit);
       return { id: itemId, foodId: text(item.foodId, 'food ID'), foodName: text(item.foodName, 'food name'), quantity: number(item.quantity, 'quantity', true), unit: itemUnit, state: state(item.state), ...pieces(item.pieces, itemUnit), ...macros(item) };
     });
-    return { id, name: text(portion.name, 'food-bank portion name'), items };
+    return { id, name: text(portion.name, 'food-bank portion name'), items, ...bankWeight(portion.weight) };
   });
   const days: Record<string, DaySettings> = {};
   for (const [key, value] of Object.entries(record(v.days))) days[date(key)] = settings(value);

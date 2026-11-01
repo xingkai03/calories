@@ -90,7 +90,7 @@ test('consumption atomically moves exactly one portion into the journal with its
   const result = consumeFoodBankPortion(initial, selected.id, '2026-10-15', ' Lunch ');
   assert.equal(result.foodBank.length, 2);
   assert.deepEqual(result.foodBank.map(portion => portion.id), [initial.foodBank[0].id, initial.foodBank[2].id]);
-  assert.deepEqual(result.entries, selected.items.map(item => ({ ...item, date: '2026-10-15', meal: 'Lunch' })));
+  assert.deepEqual(result.entries, selected.items.map(item => ({ ...item, date: '2026-10-15', meal: 'Lunch', bankPortion: { id: selected.id, name: selected.name } })));
   assert.equal(result.entries.every(entry => !Object.hasOwn(entry, 'source')), true);
   assert.deepEqual(initial, before);
   assert.notEqual(result.entries[0], selected.items[0]);
@@ -125,7 +125,7 @@ test('library edits and deletion never change stored or consumed nutrient snapsh
   initial.foods[0] = { ...initial.foods[0], name: 'New rice', carbs: 1, protein: 1, fat: 1, fiber: 1, calories: 17 };
   initial.foods = initial.foods.filter(food => food.id !== 'egg');
   const result = consumeFoodBankPortion(initial, initial.foodBank[0].id, '2026-10-15', 'Lunch');
-  assert.deepEqual(result.entries.map(({ date, meal, ...item }) => item), snapshots[0].items);
+  assert.deepEqual(result.entries.map(({ date, meal, bankPortion, ...item }) => item), snapshots[0].items);
   assert.deepEqual(result.foodBank[0], snapshots[1]);
   assert.equal(result.entries[0].foodName, 'Rice');
   assert.equal(result.entries[1].foodName, 'Eggs');

@@ -1,4 +1,4 @@
-import { canLogPieces, emptyData, energyFromMacros, macrosForFood, normalizeData, quantityFromPieces, settingsForDay, type BankPortion, type Food, type TrackerData } from './model.ts';
+import { canLogPieces, emptyData, energyFromMacros, macrosForFood, normalizeData, quantityFromPieces, settingsForDay, type BankItem, type BankPortion, type Entry, type Food, type TrackerData } from './model.ts';
 
 function positiveQuantity(value: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1e8) throw new Error('Enter a finite positive ingredient quantity.');
@@ -93,17 +93,40 @@ export function consumeFoodBankPortion(data: TrackerData, portionId: string, dat
   return normalizeData({
     ...current,
     foodBank: current.foodBank.filter(item => item.id !== portionId),
-    entries: [...current.entries, ...portion.items.map(item => ({ ...item, date, meal: meal.trim() }))],
+    entries: [...current.entries, ...portion.items.map(item => ({ ...item, date, meal: meal.trim(), bankPortion: { id: portion.id, name: portion.name } }))],
     days: { ...current.days, [date]: daySettings },
   });
 }
 
+/** The food-bank ingredient an entry eaten from the bank goes back as, with the same ID. */
+export function bankItemFromEntry({ date: _date, meal: _meal, source: _source, bankPortion: _origin, ...item }: Entry): BankItem {
+  return item;
+}
+
+/** Removes a journal entry. One eaten from the food bank goes back into its portion, so a portion
+ * whose every ingredient is removed is whole again and rejoins its group of identical portions. */
+export function removeJournalEntry(data: TrackerData, entryId: string): TrackerData {
+  const current = normalizeData(data);
+  const entry = current.entries.find(item => item.id === entryId);
+  if (!entry) throw new Error('This journal entry is no longer available.');
+  const entries = current.entries.filter(item => item.id !== entryId);
+  const origin = entry.bankPortion;
+  if (!origin) return { ...current, entries };
+  const item = bankItemFromEntry(entry);
+  const foodBank = current.foodBank.some(portion => portion.id === origin.id)
+    ? current.foodBank.map(portion => portion.id === origin.id ? { ...portion, items: [...portion.items, item] } : portion)
+    : [...current.foodBank, { id: origin.id, name: origin.name, items: [item] }];
+  return normalizeData({ ...current, entries, foodBank });
+}
+
 export interface BankGroup { name: string; portions: BankPortion[] }
 
-/** Portions with the same name and the same ingredients and amounts, ignoring IDs. A manual estimate's foodId embeds its own item ID, so it compares as 'manual'. */
+/** Portions with the same name and the same ingredients and amounts, ignoring IDs and ingredient order
+ * (a portion returned from the journal gets its ingredients back in the order they were removed).
+ * A manual estimate's foodId embeds its own item ID, so it compares as 'manual'. */
 function portionKey(portion: BankPortion): string {
   return JSON.stringify([portion.name, portion.items.map(({ id, foodId, foodName, quantity, unit, state, pieces, calories, protein, carbs, fat, fiber }) =>
-    [foodId === `manual:${id}` ? 'manual' : foodId, foodName, quantity, unit, state, pieces ?? null, calories, protein, carbs, fat, fiber])]);
+    JSON.stringify([foodId === `manual:${id}` ? 'manual' : foodId, foodName, quantity, unit, state, pieces ?? null, calories, protein, carbs, fat, fiber])).sort()]);
 }
 
 /** Groups identical portions in first-prepared order; each group lists its oldest portion first, which is the one eaten or removed next. */

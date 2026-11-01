@@ -75,3 +75,10 @@
 .cal-bank-estimate-fields { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .cal-bank-estimate-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
 .cal-bank-estimate-footer small { color: #5d6858; font-size: 11px; line-height: 1.6; }
+/* Food kept by weight */
+.cal-bank-batch-note { margin: -6px 0 10px !important; color: #5d6858; font-size: 11px; line-height: 1.6; }
+.cal-bank-consume-summary .cal-bank-batch-note { margin: -9px 0 2px !important; }
+.cal-bank-keep-switch { margin-bottom: 0; }
+.cal-bank-keep-hint { margin: -4px 0 0 !important; color: #5d6858; font-size: 12px; line-height: 1.6; }
+.cal-bank-grams { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 14px; }
+.cal-bank-grams > label { flex: 1 1 180px; }

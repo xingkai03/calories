@@ -16,7 +16,7 @@ import JournalView from './JournalView';
 import FoodsView from './FoodsView';
 import SummaryView from './SummaryView';
 import { applyCaloriesUpdate, CALORIES_UPDATE_EVENT } from '../../lib/calories/offline-shell';
-import { Icon, ModalHeader, number, errorMessage, downloadFile } from './ui';
+import { Icon, ModalHeader, number, errorMessage, downloadFile, newId } from './ui';
 import { t, getLanguage, setLanguage, storedLanguage, storeLanguage, translateMessage, LANGUAGES, LANGUAGE_NAMES, type Language } from '../../lib/calories/i18n';
 import './calories.css';
 import './offline.css';
@@ -516,8 +516,10 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
     setModal(null); setView('bank');
   }
 
-  async function eatBankPortion(portionId: string, entryDate: string, meal: string) {
-    if (!(await updateWithUndo('consume-bank', portionId, current => consumeFoodBankPortion(current, portionId, entryDate, meal), before => t('Logged {name}.', { name: before.foodBank.find(portion => portion.id === portionId)?.name ?? t('prepared portion') })))) throw new Error(lastLocalError.current);
+  async function eatBankPortion(portionId: string, entryDate: string, meal: string, grams?: number) {
+    // Grams eaten from a batch kept by weight become one new entry; its ID is fixed before the save so a retry logs it once.
+    const amount = grams === undefined ? undefined : { grams, entryId: newId() };
+    if (!(await updateWithUndo('consume-bank', portionId, current => consumeFoodBankPortion(current, portionId, entryDate, meal, amount), before => t('Logged {name}.', { name: before.foodBank.find(portion => portion.id === portionId)?.name ?? t('prepared portion') })))) throw new Error(lastLocalError.current);
     setModal(null); openDay(entryDate);
   }
 
@@ -639,7 +641,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
         : modal.type === 'food-details' ? <FoodDetails food={data.foods.find(food => food.id === modal.food.id) ?? modal.food} entries={data.entries} currentDay={currentDay} onOpenDay={day => { setModal(null); openDay(day); }} onLog={() => setModal({ type: 'entry', foodId: modal.food.id })} onClose={() => setModal(null)}/>
         : modal.type === 'food' ? <FoodEditor key={modal.food?.id ?? 'new-food'} food={modal.food} readPhotos={(input, signal) => client.readFoodPhotos(input, signal)} onSave={saveFood} onClose={() => setModal(null)}/>
         : modal.type === 'bank-prepare' ? <FoodBankEditor foods={sortedFoods} onSave={saveBankPortions} onClose={() => setModal(null)}/>
-        : modal.type === 'bank-consume' ? <FoodBankConsume portion={modal.portion} date={date} onSave={(entryDate, meal) => eatBankPortion(modal.portion.id, entryDate, meal)} onClose={() => setModal(null)}/>
+        : modal.type === 'bank-consume' ? <FoodBankConsume portion={modal.portion} date={date} onSave={(entryDate, meal, grams) => eatBankPortion(modal.portion.id, entryDate, meal, grams)} onClose={() => setModal(null)}/>
         : modal.type === 'targets' ? <TargetsEditor date={date} currentDay={currentDay} settings={targets} defaultSettings={data.defaults} garminDays={garmin.days} carryIn={carryIn} carryIsProvisional={carryIsProvisional} onSave={async (settings, makeDefault, originalRecordJson, originalDefaultsJson) => {
           if (!(await updateData(current => {
             assertCurrentRecord(settingsForDay(current, date), originalRecordJson, settings, 'these daily targets');

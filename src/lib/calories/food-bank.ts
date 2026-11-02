@@ -173,6 +173,19 @@ export function bankItemFromEntry({ date: _date, meal: _meal, source: _source, b
   return item;
 }
 
+/** A batch brought back after it was used up holds only the entries returned to it so far (each ingredient comes from
+ * the journal, as `bank:<batch id>`), so it does not know what it first held. Returning more grams grows it by the
+ * grams that do not fit, with the nutrition they were logged with; any other batch stays capped at what it first held. */
+function returnGrams(batch: BankPortion, entry: Entry): BankPortion {
+  const { total, left } = batch.weight!;
+  const overflow = left + entry.quantity - total;
+  const rebuilt = batch.items.every(item => item.foodId === `bank:${batch.id}`);
+  if (overflow <= 0 || !rebuilt) return { ...batch, weight: { total, left: Math.min(total, left + entry.quantity) } };
+  const item = bankItemFromEntry(entry), ratio = overflow / entry.quantity;
+  const extra: BankItem = { ...item, quantity: overflow, calories: item.calories * ratio, protein: item.protein * ratio, carbs: item.carbs * ratio, fat: item.fat * ratio, fiber: item.fiber * ratio };
+  return { ...batch, items: [...batch.items, extra], weight: { total: total + overflow, left: total + overflow } };
+}
+
 /** Removes a journal entry. One eaten from the food bank goes back into its portion, so a portion
  * whose every ingredient is removed is whole again and rejoins its group of identical portions. */
 export function removeJournalEntry(data: TrackerData, entryId: string): TrackerData {
@@ -187,7 +200,7 @@ export function removeJournalEntry(data: TrackerData, entryId: string): TrackerD
     // comes back holding just those grams, with the nutrition they were logged with.
     const batch = current.foodBank.find(portion => portion.id === origin.id);
     const foodBank = batch?.weight
-      ? current.foodBank.map(portion => portion === batch ? { ...portion, weight: { total: batch.weight!.total, left: Math.min(batch.weight!.total, batch.weight!.left + entry.quantity) } } : portion)
+      ? current.foodBank.map(portion => portion === batch ? returnGrams(batch, entry) : portion)
       : [...current.foodBank, { id: origin.id, name: origin.name, items: [bankItemFromEntry(entry)], weight: { total: entry.quantity, left: entry.quantity } }];
     return normalizeData({ ...current, entries, foodBank });
   }

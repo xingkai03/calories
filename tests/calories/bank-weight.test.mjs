@@ -108,3 +108,31 @@ test('eating from a batch on one device syncs to another device', () => {
   const merged = mergeJournals(base, local, base);
   assert.deepEqual(merged, local);
 });
+
+test('removing every entry of a used-up batch brings all of its grams back, in any order', () => {
+  const milkFood = { id: 'milk', name: 'Milk', baseQuantity: 100, unit: 'ml', state: 'As served', protein: 3.4, carbs: 5, fat: 3.6, fiber: 0, calories: 64 };
+  const start = { ...emptyData(), foods: [milkFood], foodBank: prepareFoodBankBatch([milkFood], [{ foodId: 'milk', quantity: 2000 }], 2000, 'Milk', ids()) };
+  const first = consumeFoodBankPortion(start, 'id-1', date, 'Breakfast', { grams: 400, entryId: 'e1' });
+  const usedUp = consumeFoodBankPortion(first, 'id-1', date, 'Lunch', { grams: 1600, entryId: 'e2' });
+  assert.deepEqual(usedUp.foodBank, []);
+  for (const order of [['e2', 'e1'], ['e1', 'e2']]) {
+    const once = removeJournalEntry(usedUp, order[0]);
+    const both = removeJournalEntry(once, order[1]);
+    assert.equal(both.foodBank.length, 1);
+    const batch = both.foodBank[0];
+    assert.deepEqual(batch.weight, { total: 2000, left: 2000 }, order.join(' then '));
+    close(nutritionForGrams(batch, 2000).calories, nutritionForGrams(start.foodBank[0], 2000).calories);
+    close(nutritionForGrams(batch, 100).protein, 3.4);
+    // Undo of the second removal takes its grams out again.
+    const receipt = createUndoAction(once, both, 'delete-entry', order[1], () => 'u1');
+    assert.deepEqual(undoAction(both, JSON.parse(JSON.stringify(receipt))), once);
+  }
+  // A batch brought back and partly eaten again only grows by what does not fit.
+  const back = removeJournalEntry(usedUp, 'e2');
+  const sip = consumeFoodBankPortion(back, 'id-1', date, 'Snack', { grams: 100, entryId: 'e3' });
+  const sipBack = removeJournalEntry(sip, 'e3');
+  assert.deepEqual(sipBack.foodBank[0].weight, { total: 1600, left: 1600 });
+  assert.deepEqual(removeJournalEntry(sipBack, 'e1').foodBank[0].weight, { total: 2000, left: 2000 });
+  const partly = consumeFoodBankPortion(back, 'id-1', date, 'Snack', { grams: 100, entryId: 'e3' });
+  assert.deepEqual(removeJournalEntry(partly, 'e1').foodBank[0].weight, { total: 1900, left: 1900 });
+});

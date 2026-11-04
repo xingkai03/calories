@@ -28,7 +28,7 @@ export const FOOD_SORTS: readonly FoodSort[] = ['frequent', 'recent', 'name'];
 export interface FoodListPreferences { window: FoodWindow; sort: FoodSort }
 export const DEFAULT_FOOD_LIST: FoodListPreferences = { window: 7, sort: 'frequent' };
 /** The display language; absent means the device's own choice (English by default). */
-export const LANGUAGE_CODES = ['en', 'zh-CN'] as const;
+export const LANGUAGE_CODES = ['en', 'zh-CN', 'de', 'sv'] as const;
 export type LanguageCode = (typeof LANGUAGE_CODES)[number];
 export interface Preferences { foodList: FoodListPreferences; language?: LanguageCode }
 /** Preferences are optional so journals saved before they existed stay byte-for-byte identical. */

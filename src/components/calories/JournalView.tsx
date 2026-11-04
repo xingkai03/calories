@@ -4,7 +4,7 @@ import type { EffectiveBurned, GarminSnapshot } from '../../lib/calories/garmin'
 import { DAILY_PROTEIN_GRAMS, macroTargets, nutrientProgress } from '../../lib/calories/nutrition';
 import { adjustedBudget, outstandingAfter, CARRY_SPREAD_DAYS, type CalorieLedger } from '../../lib/calories/budget';
 import { Icon, number, signedNumber, readableDate, syncTime, burnedLabel, burnedFormula, burnedSyncTime, staleImport, garminStatusLabel, amountLabel, mealLabel, stateLabel } from './ui';
-import { t } from '../../lib/calories/i18n';
+import { t, inSentence } from '../../lib/calories/i18n';
 import type { ModalState } from './CaloriesApp';
 
 /** One day: its energy budget with carry, nutrient targets, running balance and logged meals. */
@@ -82,7 +82,7 @@ function MacroProgressRow({ name, consumed, target, tone }: { name: string; cons
   const remaining = target - consumed;
   const detail = target === 0 ? consumed > 0 ? t('{amount} g over a zero target', { amount: number(consumed, 1) }) : t('Target is 0 g for this budget') : remaining > 0 ? t('{amount} g remaining', { amount: number(remaining, 1) }) : remaining < 0 ? t('{amount} g over target', { amount: number(-remaining, 1) }) : t('Target reached');
   return <div className={`cal-macro-progress-row cal-macro-tone-${tone}`}>
-    <div className="cal-macro-progress-heading"><span className="cal-macro-name">{name}</span><span className="cal-macro-consumed"><strong>{number(consumed, 1)}</strong><small> / {number(target, 1)} g</small></span><span className="cal-macro-percentage" aria-label={progress.percent === null ? t('{name} percentage unavailable', { name }) : t('{percent} percent of {name} target consumed', { percent: number(progress.percent, 1), name: name.toLowerCase() })}>{percent}</span></div>
+    <div className="cal-macro-progress-heading"><span className="cal-macro-name">{name}</span><span className="cal-macro-consumed"><strong>{number(consumed, 1)}</strong><small> / {number(target, 1)} g</small></span><span className="cal-macro-percentage" aria-label={progress.percent === null ? t('{name} percentage unavailable', { name }) : t('{percent} percent of {name} target consumed', { percent: number(progress.percent, 1), name: inSentence(name) })}>{percent}</span></div>
     <div className="cal-progress-track" role="progressbar" aria-label={t('{name} target progress', { name })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.barPercent} aria-valuetext={`${t('{consumed} of {target} grams', { consumed: number(consumed, 1), target: number(target, 1) })}; ${progress.percent === null ? t('percentage unavailable') : t('{percent} percent of target consumed', { percent: number(progress.percent, 1) })}`}><span style={{ width: `${progress.barPercent}%` }}/></div>
     <p className={remaining < 0 ? 'cal-macro-over' : ''}>{detail}</p>
   </div>;

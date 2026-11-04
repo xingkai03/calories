@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getLanguage, setLanguage, t, translateMessage, translateIfKnown, dateLocale } from '../../src/lib/calories/i18n.ts';
-import { ZH_CN } from '../../src/lib/calories/i18n-zh.ts';
+import { getLanguage, setLanguage, t, translateMessage, translateIfKnown, dateLocale, inSentence, LANGUAGES, TRANSLATIONS } from '../../src/lib/calories/i18n.ts';
+import { LANGUAGE_CODES } from '../../src/lib/calories/model.ts';
 import { emptyData, normalizeData } from '../../src/lib/calories/model.ts';
 import { mergeJournals, JournalConflictError } from '../../src/lib/calories/offline.ts';
 import { translationKeys } from '../../scripts/i18n-keys.mjs';
@@ -16,17 +16,44 @@ const DYNAMIC_KEYS = [
   'Garmin hasn’t reported complete calorie data yet.', 'Garmin couldn’t be reached. A later import will try again.', 'Sign in to Garmin again to resume automatic imports.', 'Garmin is temporarily limiting requests. A later import will try again.',
 ];
 
-test('every piece of UI text has a Simplified Chinese translation', () => {
-  const keys = [...translationKeys('src'), ...DYNAMIC_KEYS];
-  assert.ok(keys.length > 400, `expected the scan to find the app's text, found ${keys.length}`);
-  const missing = keys.filter(key => !Object.hasOwn(ZH_CN, key));
-  assert.deepEqual(missing, []);
+test('every language can be saved with the journal', () => {
+  assert.deepEqual([...LANGUAGE_CODES], [...LANGUAGES]);
+  assert.deepEqual(Object.keys(TRANSLATIONS).sort(), LANGUAGES.filter(language => language !== 'en').sort());
 });
 
-test('translations keep the same placeholders as the English text', () => {
-  const names = text => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort();
-  const mismatched = Object.entries(ZH_CN).filter(([english, chinese]) => names(english).join() !== names(chinese).join());
-  assert.deepEqual(mismatched, []);
+for (const [language, table] of Object.entries(TRANSLATIONS)) {
+  test(`every piece of UI text has a ${language} translation`, () => {
+    const keys = [...translationKeys('src'), ...DYNAMIC_KEYS];
+    assert.ok(keys.length > 400, `expected the scan to find the app's text, found ${keys.length}`);
+    const missing = keys.filter(key => !Object.hasOwn(table, key));
+    assert.deepEqual(missing, []);
+  });
+
+  test(`${language} translations keep the same placeholders as the English text`, () => {
+    const names = text => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort();
+    const mismatched = Object.entries(table).filter(([english, translated]) => names(english).join() !== names(translated).join());
+    assert.deepEqual(mismatched, []);
+  });
+}
+
+test('German and Swedish translate text, dates and messages built with values', () => {
+  setLanguage('de');
+  try {
+    assert.equal(t('Removed {name}.', { name: 'Erbsen' }), 'Erbsen entfernt.');
+    assert.equal(dateLocale(), 'de-DE');
+    assert.equal(translateIfKnown('Lunch'), 'Mittagessen');
+    // German nouns keep their capital mid-sentence.
+    assert.equal(inSentence(t('Last 7 days')), 'Letzte 7 Tage');
+    assert.equal(translateMessage('Bread has no piece weight. Enter its amount in g.'), 'Bread hat kein Stückgewicht. Gib die Menge in g ein.');
+  } finally { setLanguage('en'); }
+  setLanguage('sv');
+  try {
+    assert.equal(t('Log food'), 'Logga mat');
+    assert.equal(dateLocale(), 'sv-SE');
+    assert.equal(inSentence(t('Last 7 days')), 'senaste 7 dagarna');
+    assert.equal(translateMessage(new JournalConflictError('the app settings').message), 'Den här och en annan enhet har ändrat appens inställningar. Dina lokala ändringar behålls. Exportera en säkerhetskopia innan du väljer vilken version du ska behålla.');
+  } finally { setLanguage('en'); }
+  assert.equal(inSentence(t('Last 7 days')), 'last 7 days');
 });
 
 test('English is the default, and t() fills placeholders in either language', () => {
@@ -62,6 +89,7 @@ test('error messages from the app translate, including ones built with values', 
 test('the language setting is saved with the journal and rejects unknown values', () => {
   const foodList = { window: 7, sort: 'frequent' };
   assert.deepEqual(normalizeData({ ...emptyData(), preferences: { foodList, language: 'zh-CN' } }).preferences, { foodList, language: 'zh-CN' });
+  assert.deepEqual(normalizeData({ ...emptyData(), preferences: { foodList, language: 'sv' } }).preferences, { foodList, language: 'sv' });
   assert.deepEqual(normalizeData({ ...emptyData(), preferences: { foodList } }).preferences, { foodList });
   assert.throws(() => normalizeData({ ...emptyData(), preferences: { foodList, language: 'fr' } }), /language setting/);
 });

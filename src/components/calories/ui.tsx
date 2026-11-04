@@ -84,3 +84,6 @@ export function downloadFile(contents: string, filename: string, type: string) {
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/** A food's price as "12.5 kr per 500 g" (or per N pieces). */
+export const priceLabel = (price: { kronor: number; quantity: number; pieces?: true }, unit: string) => t('{kronor} kr per {amount}', { kronor: number(price.kronor, 2), amount: `${number(price.quantity, 2)} ${unitLabel(price.pieces ? 'piece' : unit, price.quantity)}` });

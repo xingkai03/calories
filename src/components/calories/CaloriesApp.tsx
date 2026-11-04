@@ -28,6 +28,7 @@ const TargetsEditor = lazy(() => loadModals().then(m => ({ default: m.TargetsEdi
 const GarminConnection = lazy(() => loadModals().then(m => ({ default: m.GarminConnection })));
 const TransferDialog = lazy(() => loadModals().then(m => ({ default: m.TransferDialog })));
 const FoodDetails = lazy(() => import('./FoodDetails'));
+const ProteinCost = lazy(() => import('./ProteinCost'));
 const NO_ENTRIES: Entry[] = [];
 
 type View = 'journal' | 'foods' | 'bank' | 'summary';
@@ -53,7 +54,7 @@ function urlFor(view: View, date: string, currentDay: string): string {
 }
 type Phase = 'loading' | 'setup' | 'login' | 'ready';
 type SaveState = 'saved' | 'pending' | 'saving' | 'device' | 'offline' | 'error';
-export type ModalState = { type: 'entry'; entry?: Entry; foodId?: string; meal?: string } | { type: 'food'; food?: Food; returnToLog?: boolean } | { type: 'targets' } | { type: 'transfer' } | { type: 'garmin' } | { type: 'bank-prepare' } | { type: 'bank-consume'; portion: BankPortion } | { type: 'food-details'; food: Food } | { type: 'settings' } | null;
+export type ModalState = { type: 'entry'; entry?: Entry; foodId?: string; meal?: string } | { type: 'food'; food?: Food; returnToLog?: boolean } | { type: 'targets' } | { type: 'transfer' } | { type: 'garmin' } | { type: 'bank-prepare' } | { type: 'bank-consume'; portion: BankPortion } | { type: 'food-details'; food: Food } | { type: 'protein-cost' } | { type: 'settings' } | null;
 
 
 export default function CaloriesApp({ clientOverride }: { clientOverride?: ReturnType<typeof createClient> } = {}) {
@@ -636,9 +637,10 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
 
       {undoNotice && <UndoNotice id={undoNotice.action.id} message={undoNotice.message} active={!modal} onUndo={() => undoLatest(undoNotice.action, undoNotice.scope)} onDismiss={() => setUndoNotice(current => current?.action.id === undoNotice.action.id ? null : current)}/>}
 
-      {modal && <Modal onClose={() => setModal(null)} dismissOnBackdrop={modal.type === 'food-details' || modal.type === 'garmin' || modal.type === 'settings'}><Suspense fallback={<div className="cal-loading" role="status"><span className="cal-spinner"/><p>{t('Opening…')}</p></div>}>{modal.type === 'settings' ? <SettingsDialog language={language} onLanguage={next => void changeLanguage(next)} onClose={() => setModal(null)}/>
+      {modal && <Modal onClose={() => setModal(null)} dismissOnBackdrop={modal.type === 'food-details' || modal.type === 'protein-cost' || modal.type === 'garmin' || modal.type === 'settings'}><Suspense fallback={<div className="cal-loading" role="status"><span className="cal-spinner"/><p>{t('Opening…')}</p></div>}>{modal.type === 'settings' ? <SettingsDialog language={language} onLanguage={next => void changeLanguage(next)} onClose={() => setModal(null)}/>
         : modal.type === 'entry' ? <EntryEditor key={modal.entry?.id ?? modal.foodId ?? 'new-entry'} entry={modal.entry} initialFoodId={modal.foodId} initialMeal={modal.meal} lastQuantities={lastQuantities} recentFoodIds={recentIds ?? undefined} recentWindow={foodList.window} foods={sortedFoods} date={date} onSave={saveEntry} readMealPhoto={(input, signal) => client.estimateMealPhoto(input, signal)} onAddFood={() => setModal({ type: 'food', returnToLog: true })} onFoodBank={openFoodBank} bankCount={data.foodBank.length} onClose={() => setModal(null)}/>
         : modal.type === 'food-details' ? <FoodDetails food={data.foods.find(food => food.id === modal.food.id) ?? modal.food} entries={data.entries} currentDay={currentDay} onOpenDay={day => { setModal(null); openDay(day); }} onLog={() => setModal({ type: 'entry', foodId: modal.food.id })} onClose={() => setModal(null)}/>
+        : modal.type === 'protein-cost' ? <ProteinCost foods={data.foods} onOpenFood={food => setModal({ type: 'food-details', food })} onClose={() => setModal(null)}/>
         : modal.type === 'food' ? <FoodEditor key={modal.food?.id ?? 'new-food'} food={modal.food} readPhotos={(input, signal) => client.readFoodPhotos(input, signal)} onSave={saveFood} onClose={() => setModal(null)}/>
         : modal.type === 'bank-prepare' ? <FoodBankEditor foods={sortedFoods} onSave={saveBankPortions} onClose={() => setModal(null)}/>
         : modal.type === 'bank-consume' ? <FoodBankConsume portion={modal.portion} date={date} onSave={(entryDate, meal, grams) => eatBankPortion(modal.portion.id, entryDate, meal, grams)} onClose={() => setModal(null)}/>

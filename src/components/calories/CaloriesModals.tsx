@@ -151,12 +151,16 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
 }
 
 export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food; readPhotos: (input: FoodPhotoRequest, signal: AbortSignal) => Promise<FoodPhotoDraft>; onSave: (food: Food, originalRecordJson: string) => void | Promise<void>; onClose: () => void }) {
-  const form = usePersistentFormDraft(food ? `food:${food.id}` : 'food:new', { draftFoodId: food?.id ?? newId(), originalRecordJson: JSON.stringify(food ?? null), name: food?.name ?? '', baseQuantity: String(food?.baseQuantity ?? 100), unit: (food?.unit ?? 'g') as Food['unit'] | '', state: (food?.state ?? 'As served') as Food['state'], pieceWeight: food?.pieceWeight === undefined ? '' : String(food.pieceWeight), nutrients: { carbs: String(food?.carbs ?? ''), protein: String(food?.protein ?? ''), fat: String(food?.fat ?? ''), fiber: String(food?.fiber ?? '') }, importedLabel: false }, value => ({ kind: 'food', label: value.name.trim() || t('New library food'), ...(food ? { foodId: food.id } : {}) }));
+  const form = usePersistentFormDraft(food ? `food:${food.id}` : 'food:new', { draftFoodId: food?.id ?? newId(), originalRecordJson: JSON.stringify(food ?? null), name: food?.name ?? '', baseQuantity: String(food?.baseQuantity ?? 100), unit: (food?.unit ?? 'g') as Food['unit'] | '', state: (food?.state ?? 'As served') as Food['state'], pieceWeight: food?.pieceWeight === undefined ? '' : String(food.pieceWeight), priceKronor: food?.price ? String(food.price.kronor) : '', priceQuantity: food?.price ? String(food.price.quantity) : '', priceInPieces: Boolean(food?.price?.pieces), nutrients: { carbs: String(food?.carbs ?? ''), protein: String(food?.protein ?? ''), fat: String(food?.fat ?? ''), fiber: String(food?.fiber ?? '') }, importedLabel: false }, value => ({ kind: 'food', label: value.name.trim() || t('New library food'), ...(food ? { foodId: food.id } : {}) }));
   const [name, setName] = form.field('name');
   const [baseQuantity, setBaseQuantity] = form.field('baseQuantity');
   const [unit, setUnit] = form.field('unit');
   const [state, setState] = form.field('state');
   const [pieceWeight, setPieceWeight] = form.field('pieceWeight');
+  const [priceKronor, setPriceKronor] = form.field('priceKronor');
+  const [priceQuantity, setPriceQuantity] = form.field('priceQuantity');
+  const [priceInPieces, setPriceInPieces] = form.field('priceInPieces');
+  const hasPieceWeight = Number(pieceWeight) > 0;
   const [nutrients, setNutrients] = form.field('nutrients');
   const [importedLabel, setImportedLabel] = form.field('importedLabel');
   const hasNutrients = Object.values(nutrients).some(value => value.trim() !== '');
@@ -179,11 +183,17 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
     if (photoBusy || submitting) return;
     const weight = pieceWeight.trim() ? Number(pieceWeight) : undefined;
     if (weight !== undefined && (!Number.isFinite(weight) || weight <= 0 || weight > 1e8)) { setError(t('Leave the piece weight blank or enter a number greater than zero.')); return; }
+    const kronor = priceKronor.trim() ? Number(priceKronor) : undefined, priceAmount = Number(priceQuantity);
+    if (kronor !== undefined && (!Number.isFinite(kronor) || kronor < 0 || kronor > 1e8 || !priceQuantity.trim() || !Number.isFinite(priceAmount) || priceAmount <= 0 || priceAmount > 1e8)) { setError(t('Leave the price blank, or enter a price and how much it buys.')); return; }
+    const pricedInPieces = unit === 'piece' || priceInPieces;
+    if (kronor !== undefined && priceInPieces && unit !== 'piece' && weight === undefined) { setError(t('Add the weight of one piece to price this food per piece.')); return; }
     if (!name.trim() || !unit || !Number.isFinite(Number(baseQuantity)) || Number(baseQuantity) <= 0 || !Number.isFinite(calories) || calories > 1e8 || Object.values(nutrients).some(value => !Number.isFinite(Number(value)) || Number(value) < 0)) { setError(t('Add a food name, a label quantity greater than zero, a unit, and valid nutrition values.')); return; }
     setSubmitting(true);
     // A piece food with a known weight becomes a gram food, so it can be logged either way.
     const amount = unit === 'piece' && weight !== undefined ? { baseQuantity: Number(baseQuantity) * weight, unit: 'g' as const, pieceWeight: weight } : { baseQuantity: Number(baseQuantity), unit, ...(weight !== undefined ? { pieceWeight: weight } : {}) };
-    try { await onSave({ id: form.draft.draftFoodId, name: name.trim(), ...amount, state, carbs: Number(nutrients.carbs), protein: Number(nutrients.protein), fat: Number(nutrients.fat), fiber: Number(nutrients.fiber), calories }, form.draft.originalRecordJson); form.clearDraft(); }
+    // A price per piece stays per piece on a gram food; on a piece food the quantity is already pieces.
+    const price = kronor === undefined ? {} : { price: { kronor, quantity: priceAmount, ...(pricedInPieces && amount.unit !== 'piece' ? { pieces: true as const } : {}) } };
+    try { await onSave({ id: form.draft.draftFoodId, name: name.trim(), ...amount, ...price, state, carbs: Number(nutrients.carbs), protein: Number(nutrients.protein), fat: Number(nutrients.fat), fiber: Number(nutrients.fiber), calories }, form.draft.originalRecordJson); form.clearDraft(); }
     catch (error) { setError(errorMessage(error)); }
     finally { setSubmitting(false); }
   }
@@ -201,6 +211,12 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
         </div>
         <NumericField label={t('Weight of one piece')} value={pieceWeight} onChange={setPieceWeight} unit={unit === 'ml' ? 'ml' : 'g'} required={false} placeholder={t('Optional')} describedBy="cal-piece-weight-hint"/>
         <p className="cal-field-hint" id="cal-piece-weight-hint">{t(unit === 'piece' ? 'Optional. Add it to also log this food in grams.' : 'Optional, e.g. 19 g for a slice. Lets you log this food in pieces or by weight.')}</p>
+        <div className="cal-form-grid cal-form-grid-three">
+          <NumericField label={t('Price')} value={priceKronor} onChange={setPriceKronor} unit="kr" required={false} placeholder={t('Optional')} describedBy="cal-price-hint"/>
+          <NumericField label={t('Price is for')} value={priceQuantity} onChange={setPriceQuantity} unit="" required={false}/>
+          <label>{t('Price unit')}<select value={unit === 'piece' || priceInPieces ? 'pieces' : 'unit'} onChange={event => setPriceInPieces(event.target.value === 'pieces')}>{unit !== 'piece' && <option value="unit">{unit === 'ml' ? 'ml' : 'g'}</option>}{(unit === 'piece' || hasPieceWeight || priceInPieces) && <option value="pieces">{t('pieces')}</option>}</select></label>
+        </div>
+        <p className="cal-field-hint" id="cal-price-hint">{t('Optional. What you paid in kronor and how much it bought, e.g. 32 kr for 500 g. Used to rank foods by what their protein costs.')}</p>
         <div className="cal-form-section-label"><strong>{t('Nutrition per {amount}', { amount: `${baseQuantity || '—'} ${unitLabel(unit, Number(baseQuantity))}` })}</strong><p>{t('Enter the label’s values in grams. Leave blank for zero.')}</p></div>
         <div className="cal-form-grid"><NumericField label={t('Protein')} value={nutrients.protein} onChange={value => nutrient('protein', value)} required={false}/><NumericField label={t('Carbohydrate')} value={nutrients.carbs} onChange={value => nutrient('carbs', value)} required={false}/><NumericField label={t('Fat')} value={nutrients.fat} onChange={value => nutrient('fat', value)} required={false}/><NumericField label={t('Fibre')} value={nutrients.fiber} onChange={value => nutrient('fiber', value)} required={false}/></div>
         <div className="cal-budget-preview" aria-live="polite"><span>{t('Calculated energy')}</span><strong><output aria-label={t('Calculated energy')}>{hasNutrients ? number(calories, 1) : '—'}</output> kcal</strong><p>{t('4 × protein + 4 × carbohydrate + 9 × fat')}</p></div>

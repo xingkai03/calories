@@ -4,7 +4,10 @@ export type Unit = 'g' | 'ml' | 'piece';
 export type FoodState = 'Raw' | 'Cooked' | 'As served';
 export interface Macros { carbs: number; protein: number; fat: number; fiber: number; calories: number }
 /** pieceWeight is the weight (g) or volume (ml) of one piece, so a gram or millilitre food can also be logged by the piece. */
-export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState; pieceWeight?: number }
+/** What the food costs: kronor (SEK) for a quantity in the food's unit, or a count of pieces when pieces is true
+ * (only on a gram or millilitre food with a piece weight). */
+export interface FoodPrice { kronor: number; quantity: number; pieces?: true }
+export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState; pieceWeight?: number; price?: FoodPrice }
 /** quantity is always in unit; pieces records how many pieces it was when logged by the piece.
  * bankPortion records the food-bank portion an entry was eaten from, so removing it returns it to the bank. */
 export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; pieces?: number; source?: 'manual'; bankPortion?: BankOrigin }
@@ -107,6 +110,13 @@ function pieceWeight(value: unknown, foodUnit: Unit): { pieceWeight?: number } {
   if (foodUnit === 'piece') throw new Error('Invalid piece weight: a food counted in pieces has no piece weight.');
   return { pieceWeight: number(value, 'piece weight', true) };
 }
+function price(value: unknown, food: Pick<Food, 'unit' | 'pieceWeight'>): { price?: FoodPrice } {
+  if (value === undefined) return {};
+  const v = record(value);
+  if (v.pieces !== undefined && v.pieces !== true) throw new Error('Invalid food price.');
+  if (v.pieces && !canLogPieces(food)) throw new Error('Invalid food price: a price per piece needs a piece weight.');
+  return { price: { kronor: number(v.kronor, 'food price'), quantity: number(v.quantity, 'food price quantity', true), ...(v.pieces ? { pieces: true as const } : {}) } };
+}
 function pieces(value: unknown, entryUnit: Unit): { pieces?: number } {
   if (value === undefined) return {};
   if (entryUnit === 'piece') throw new Error('Invalid piece count: the quantity is already in pieces.');
@@ -180,7 +190,8 @@ export function normalizeData(raw: unknown): TrackerData {
     const f = record(rawFood);
     const nutrients = macros(f);
     const foodUnit = unit(f.unit);
-    return { id: text(f.id, 'food ID'), name: text(f.name, 'food name'), baseQuantity: number(f.baseQuantity, 'base quantity', true), unit: foodUnit, state: state(f.state), ...pieceWeight(f.pieceWeight, foodUnit), ...nutrients, calories: number(energyFromMacros(nutrients), 'calculated calories') };
+    const weight = pieceWeight(f.pieceWeight, foodUnit);
+    return { id: text(f.id, 'food ID'), name: text(f.name, 'food name'), baseQuantity: number(f.baseQuantity, 'base quantity', true), unit: foodUnit, state: state(f.state), ...weight, ...price(f.price, { unit: foodUnit, ...weight }), ...nutrients, calories: number(energyFromMacros(nutrients), 'calculated calories') };
   });
   const entries: Entry[] = Array.from(v.entries).map(rawEntry => {
     const e = record(rawEntry);

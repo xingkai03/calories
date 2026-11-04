@@ -85,5 +85,7 @@ export function downloadFile(contents: string, filename: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** A food's price as "12.5 kr per 500 g" (or per N pieces). */
-export const priceLabel = (price: { kronor: number; quantity: number; pieces?: true }, unit: string) => t('{kronor} kr per {amount}', { kronor: number(price.kronor, 2), amount: `${number(price.quantity, 2)} ${unitLabel(price.pieces ? 'piece' : unit, price.quantity)}` });
+/** An amount of the raw state of a cooked food: "100 g raw". */
+export const rawAmount = (amount: string) => t('{amount} raw', { amount });
+/** A food's price as "12.5 kr per 500 g" (or per N pieces); a cooked food's price is for its raw state. */
+export const priceLabel = (price: { kronor: number; quantity: number; pieces?: true }, unit: string, raw = false) => { const amount = `${number(price.quantity, 2)} ${unitLabel(price.pieces ? 'piece' : unit, price.quantity)}`; return t('{kronor} kr per {amount}', { kronor: number(price.kronor, 2), amount: raw ? rawAmount(amount) : amount }); };

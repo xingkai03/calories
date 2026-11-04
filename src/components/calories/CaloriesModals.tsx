@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { canLogPieces, energyFromMacros, macrosForFood, manualMealEntry, quantityFromPieces, normalizeData, todayISO, type DaySettings, type Entry, type Food, type TrackerData } from '../../lib/calories/model';
+import { canLogPieces, energyFromMacros, foodInState, hasRawState, macrosForFood, manualMealEntry, quantityFromPieces, normalizeData, todayISO, type DaySettings, type Entry, type Food, type TrackerData } from '../../lib/calories/model';
 import { effectiveBurned, type GarminDay, type GarminSnapshot, type GarminStatus } from '../../lib/calories/garmin';
 import { DAILY_PROTEIN_GRAMS, macroTargets } from '../../lib/calories/nutrition';
 import { adjustedBudget, CARRY_SPREAD_DAYS } from '../../lib/calories/budget';
@@ -12,15 +12,16 @@ import { mealForTime } from '../../lib/calories/food-order';
 import { Icon, ModalHeader, NumericField, number, signedNumber, readableDate, downloadFile, errorMessage, newId, unitLabel, previewNumber, syncTime, burnedFormula, burnedSyncTime, staleImport, garminStatusLabel, garminErrorMeaning, stateLabel } from './ui';
 import { t } from '../../lib/calories/i18n';
 
-export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities = {}, recentFoodIds, recentWindow = 7, foods, date, onSave, readMealPhoto, onAddFood, onFoodBank, bankCount, onClose }: { entry?: Entry; initialFoodId?: string; initialMeal?: string; lastQuantities?: Record<string, { quantity: number; pieces?: number }>; recentFoodIds?: ReadonlySet<string>; recentWindow?: number; foods: Food[]; date: string; onSave: (entry: Entry, originalRecordJson: string) => void | Promise<void>; readMealPhoto: (input: MealPhotoRequest, signal: AbortSignal) => Promise<MealPhotoDraft>; onAddFood: () => void; onFoodBank: () => void; bankCount: number; onClose: () => void }) {
+export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities = {}, recentFoodIds, recentWindow = 7, foods, date, onSave, readMealPhoto, onAddFood, onFoodBank, bankCount, onClose }: { entry?: Entry; initialFoodId?: string; initialMeal?: string; lastQuantities?: Record<string, { quantity: number; pieces?: number; state?: Food['state'] }>; recentFoodIds?: ReadonlySet<string>; recentWindow?: number; foods: Food[]; date: string; onSave: (entry: Entry, originalRecordJson: string) => void | Promise<void>; readMealPhoto: (input: MealPhotoRequest, signal: AbortSignal) => Promise<MealPhotoDraft>; onAddFood: () => void; onFoodBank: () => void; bankCount: number; onClose: () => void }) {
   const manualEditing = entry?.source === 'manual' || Boolean(entry && entry.foodId === `manual:${entry.id}`);
   const initialFood = foods.find(food => food.id === (manualEditing ? initialFoodId : entry?.foodId ?? initialFoodId)) ?? foods.find(food => recentFoodIds?.has(food.id)) ?? foods[0];
   const standardMeals = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
-  // A new food starts at the amount last logged; otherwise at one piece, or the label quantity.
+  // A new food starts at the amount and state last logged; otherwise at one piece, or the label quantity, cooked.
   const startAmount = (food: Food) => {
     const last = lastQuantities[food.id];
-    if (canLogPieces(food) && (!last || last.pieces !== undefined)) return { quantity: String(last?.pieces ?? 1), byPiece: true };
-    return { quantity: String(last?.quantity ?? food.baseQuantity), byPiece: false };
+    const raw = hasRawState(food) && last?.state === 'Raw';
+    if (canLogPieces(food) && (!last || last.pieces !== undefined)) return { quantity: String(last?.pieces ?? 1), byPiece: true, raw };
+    return { quantity: String(last?.quantity ?? food.baseQuantity), byPiece: false, raw };
   };
   const newMeal = initialMeal ?? mealForTime();
   const form = usePersistentFormDraft(entry ? `entry:${entry.id}` : 'entry:new', {
@@ -28,7 +29,7 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
     originalRecordJson: JSON.stringify(entry ?? null),
     mode: (entry ? manualEditing ? 'manual' : 'library' : foods.length ? 'library' : 'manual') as 'library' | 'manual',
     foodId: manualEditing ? '' : entry ? entry.foodId : initialFood?.id ?? '', foodFilter: '',
-    ...(!manualEditing && entry ? { quantity: String(entry.pieces ?? entry.quantity), byPiece: entry.pieces !== undefined } : initialFood ? startAmount(initialFood) : { quantity: '100', byPiece: false }),
+    ...(!manualEditing && entry ? { quantity: String(entry.pieces ?? entry.quantity), byPiece: entry.pieces !== undefined, raw: false } : initialFood ? startAmount(initialFood) : { quantity: '100', byPiece: false, raw: false }),
     manualName: manualEditing ? entry?.foodName ?? '' : '',
     manualNutrients: { protein: manualEditing ? String(entry?.protein ?? '') : '', carbs: manualEditing ? String(entry?.carbs ?? '') : '', fat: manualEditing ? String(entry?.fat ?? '') : '', fiber: manualEditing ? String(entry?.fiber ?? '') : '' },
     mealChoice: (meal => standardMeals.includes(meal) ? meal : 'Custom')(entry?.meal ?? newMeal), customMeal: entry?.meal ?? (standardMeals.includes(newMeal) ? '' : newMeal), entryDate: entry?.date ?? date,
@@ -42,7 +43,8 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
   const [foodFilter, setFoodFilter] = form.field('foodFilter');
   const [quantity, setQuantity] = form.field('quantity');
   const [byPiece, setByPiece] = form.field('byPiece');
-  function startFood(food: Food) { const start = startAmount(food); setQuantity(start.quantity); setByPiece(start.byPiece); }
+  const [rawField, setRaw] = form.field('raw');
+  function startFood(food: Food) { const start = startAmount(food); setQuantity(start.quantity); setByPiece(start.byPiece); setRaw(start.raw); }
   const [manualName, setManualName] = form.field('manualName');
   const [manualNutrients, setManualNutrients] = form.field('manualNutrients');
   const [mealChoice, setMealChoice] = form.field('mealChoice');
@@ -60,7 +62,18 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
   const isListed = (food: Food, query: string) => matches(food, query) && (showAllFoods || query.trim() !== '' || !recentFoodIds?.size || recentFoodIds.has(food.id) || food.id === savedFood?.id || food.id === initialFoodId || food.id === foodId);
   const filteredFoods = choices.filter(food => isListed(food, foodFilter));
   const hiddenFoods = foodFilter.trim() ? 0 : choices.length - filteredFoods.length;
-  const selectedFood = filteredFoods.find(food => food.id === foodId);
+  const pickedFood = filteredFoods.find(food => food.id === foodId);
+  // A cooked library food can be logged by its raw weight; the saved entry's own snapshot keeps its state.
+  const statesAllowed = Boolean(pickedFood && pickedFood !== savedFood && hasRawState(pickedFood));
+  const loggingRaw = statesAllowed && Boolean(rawField);
+  const selectedFood = pickedFood && loggingRaw ? foodInState(pickedFood, 'Raw') : pickedFood;
+  function changeState(raw: boolean) {
+    if (!pickedFood || !statesAllowed || raw === loggingRaw) return;
+    const value = Number(quantity), ratio = pickedFood.cookedRatio ?? 1;
+    // Convert a typed weight so the portion stays the same; a count of pieces stays as it is.
+    if (!loggingPieces && quantity.trim() && Number.isFinite(value) && value > 0) setQuantity(String(Math.round((raw ? value / ratio : value * ratio) * 100) / 100));
+    setRaw(raw); setError('');
+  }
   const piecesAllowed = Boolean(selectedFood && canLogPieces(selectedFood));
   const loggingPieces = piecesAllowed && byPiece;
   // The amount in the food's own unit (g, ml or pieces), whichever way it was entered.
@@ -138,6 +151,7 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
         <p className="cal-field-hint">{t('Enter the estimated nutrient totals for the entire meal or portion you ate. Leave blank for zero.')}</p>
         <div className="cal-form-grid"><NumericField label={t('Protein total')} value={manualNutrients.protein} onChange={value => changeManualNutrient('protein', value)} required={false}/><NumericField label={t('Carbohydrate total')} value={manualNutrients.carbs} onChange={value => changeManualNutrient('carbs', value)} required={false}/><NumericField label={t('Fat total')} value={manualNutrients.fat} onChange={value => changeManualNutrient('fat', value)} required={false}/><NumericField label={t('Fibre total')} value={manualNutrients.fiber} onChange={value => changeManualNutrient('fiber', value)} required={false}/></div>
       </>}
+      {mode === 'library' && statesAllowed && <div className="cal-entry-mode-switch cal-amount-unit-switch" role="group" aria-label={t('Food state')}>{[false, true].map(raw => <button key={String(raw)} type="button" className={loggingRaw === raw ? 'is-active' : ''} aria-pressed={loggingRaw === raw} onClick={() => changeState(raw)}>{stateLabel(raw ? 'Raw' : 'Cooked')}</button>)}</div>}
       {mode === 'library' && piecesAllowed && selectedFood && <div className="cal-entry-mode-switch cal-amount-unit-switch" role="group" aria-label={t('Log amount in')}><button type="button" className={loggingPieces ? 'is-active' : ''} aria-pressed={loggingPieces} onClick={() => changeAmountUnit(true)}>{t('Pieces ({weight} each)', { weight: `${number(selectedFood.pieceWeight ?? 0, 2)} ${selectedFood.unit}` })}</button><button type="button" className={!loggingPieces ? 'is-active' : ''} aria-pressed={!loggingPieces} onClick={() => changeAmountUnit(false)}>{t(selectedFood.unit === 'ml' ? 'Millilitres' : 'Grams')}</button></div>}
       <div className="cal-form-grid">{mode === 'library' && <NumericField label={t('Quantity')} value={quantity} onChange={setQuantity} unit={loggingPieces ? unitLabel('piece', Number(quantity)) : selectedFood?.unit ?? 'g'} min={0.001}/>}<label>{t('Meal')}<select value={mealChoice} onChange={event => setMealChoice(event.target.value)}>{standardMeals.map(meal => <option key={meal} value={meal}>{t(meal)}</option>)}<option value="Custom">{t('Custom')}</option></select></label>{mode === 'manual' && <label>{t('Date')}<input type="date" value={entryDate} onChange={event => setEntryDate(event.target.value)} required/></label>}</div>
       {mealChoice === 'Custom' && <label>{t('Meal name or number')}<input type="text" value={customMeal} onChange={event => setCustomMeal(event.target.value)} placeholder={t('e.g. Meal 1, late lunch')} required maxLength={80}/></label>}
@@ -151,11 +165,13 @@ export function EntryEditor({ entry, initialFoodId, initialMeal, lastQuantities 
 }
 
 export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food; readPhotos: (input: FoodPhotoRequest, signal: AbortSignal) => Promise<FoodPhotoDraft>; onSave: (food: Food, originalRecordJson: string) => void | Promise<void>; onClose: () => void }) {
-  const form = usePersistentFormDraft(food ? `food:${food.id}` : 'food:new', { draftFoodId: food?.id ?? newId(), originalRecordJson: JSON.stringify(food ?? null), name: food?.name ?? '', baseQuantity: String(food?.baseQuantity ?? 100), unit: (food?.unit ?? 'g') as Food['unit'] | '', state: (food?.state ?? 'As served') as Food['state'], pieceWeight: food?.pieceWeight === undefined ? '' : String(food.pieceWeight), priceKronor: food?.price ? String(food.price.kronor) : '', priceQuantity: food?.price ? String(food.price.quantity) : '', priceInPieces: Boolean(food?.price?.pieces), nutrients: { carbs: String(food?.carbs ?? ''), protein: String(food?.protein ?? ''), fat: String(food?.fat ?? ''), fiber: String(food?.fiber ?? '') }, importedLabel: false }, value => ({ kind: 'food', label: value.name.trim() || t('New library food'), ...(food ? { foodId: food.id } : {}) }));
+  const form = usePersistentFormDraft(food ? `food:${food.id}` : 'food:new', { draftFoodId: food?.id ?? newId(), originalRecordJson: JSON.stringify(food ?? null), name: food?.name ?? '', baseQuantity: String(food?.baseQuantity ?? 100), unit: (food?.unit ?? 'g') as Food['unit'] | '', state: (food?.state ?? 'As served') as Food['state'], cookedRatio: String(food?.cookedRatio ?? 1), pieceWeight: food?.pieceWeight === undefined ? '' : String(food.pieceWeight), priceKronor: food?.price ? String(food.price.kronor) : '', priceQuantity: food?.price ? String(food.price.quantity) : '', priceInPieces: Boolean(food?.price?.pieces), nutrients: { carbs: String(food?.carbs ?? ''), protein: String(food?.protein ?? ''), fat: String(food?.fat ?? ''), fiber: String(food?.fiber ?? '') }, importedLabel: false }, value => ({ kind: 'food', label: value.name.trim() || t('New library food'), ...(food ? { foodId: food.id } : {}) }));
   const [name, setName] = form.field('name');
   const [baseQuantity, setBaseQuantity] = form.field('baseQuantity');
   const [unit, setUnit] = form.field('unit');
   const [state, setState] = form.field('state');
+  const [cookedRatioField, setCookedRatio] = form.field('cookedRatio');
+  const cookedRatio = cookedRatioField ?? '1';
   const [pieceWeight, setPieceWeight] = form.field('pieceWeight');
   const [priceKronor, setPriceKronor] = form.field('priceKronor');
   const [priceQuantity, setPriceQuantity] = form.field('priceQuantity');
@@ -183,6 +199,8 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
     if (photoBusy || submitting) return;
     const weight = pieceWeight.trim() ? Number(pieceWeight) : undefined;
     if (weight !== undefined && (!Number.isFinite(weight) || weight <= 0 || weight > 1e8)) { setError(t('Leave the piece weight blank or enter a number greater than zero.')); return; }
+    const ratio = Number(cookedRatio);
+    if (state === 'Cooked' && (!cookedRatio.trim() || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1e8)) { setError(t('Enter a cooked/raw weight ratio greater than zero.')); return; }
     const kronor = priceKronor.trim() ? Number(priceKronor) : undefined, priceAmount = Number(priceQuantity);
     if (kronor !== undefined && (!Number.isFinite(kronor) || kronor < 0 || kronor > 1e8 || !priceQuantity.trim() || !Number.isFinite(priceAmount) || priceAmount <= 0 || priceAmount > 1e8)) { setError(t('Leave the price blank, or enter a price and how much it buys.')); return; }
     const pricedInPieces = unit === 'piece' || priceInPieces;
@@ -193,7 +211,7 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
     const amount = unit === 'piece' && weight !== undefined ? { baseQuantity: Number(baseQuantity) * weight, unit: 'g' as const, pieceWeight: weight } : { baseQuantity: Number(baseQuantity), unit, ...(weight !== undefined ? { pieceWeight: weight } : {}) };
     // A price per piece stays per piece on a gram food; on a piece food the quantity is already pieces.
     const price = kronor === undefined ? {} : { price: { kronor, quantity: priceAmount, ...(pricedInPieces && amount.unit !== 'piece' ? { pieces: true as const } : {}) } };
-    try { await onSave({ id: form.draft.draftFoodId, name: name.trim(), ...amount, ...price, state, carbs: Number(nutrients.carbs), protein: Number(nutrients.protein), fat: Number(nutrients.fat), fiber: Number(nutrients.fiber), calories }, form.draft.originalRecordJson); form.clearDraft(); }
+    try { await onSave({ id: form.draft.draftFoodId, name: name.trim(), ...amount, ...price, state, ...(state === 'Cooked' ? { cookedRatio: ratio } : {}), carbs: Number(nutrients.carbs), protein: Number(nutrients.protein), fat: Number(nutrients.fat), fiber: Number(nutrients.fiber), calories }, form.draft.originalRecordJson); form.clearDraft(); }
     catch (error) { setError(errorMessage(error)); }
     finally { setSubmitting(false); }
   }
@@ -209,10 +227,13 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
           <label>{t('Unit')}<select value={unit} onChange={event => { const nextUnit = event.target.value as Food['unit']; setUnit(nextUnit); if (!food && !importedLabel) setBaseQuantity(nextUnit === 'piece' ? '1' : '100'); }} required><option value="" disabled>{t('Choose unit')}</option><option value="g">{t('grams (g)')}</option><option value="ml">{t('millilitres (ml)')}</option><option value="piece">{t('piece')}</option></select></label>
           <label>{t('State')}<select value={state} onChange={event => setState(event.target.value as Food['state'])}>{(['As served', 'Raw', 'Cooked'] as const).map(option => <option key={option} value={option}>{stateLabel(option)}</option>)}</select></label>
         </div>
-        <NumericField label={t('Weight of one piece')} value={pieceWeight} onChange={setPieceWeight} unit={unit === 'ml' ? 'ml' : 'g'} required={false} placeholder={t('Optional')}/>
+        <div className={state === 'Cooked' ? 'cal-form-grid' : 'cal-form'}>
+          {state === 'Cooked' && <NumericField label={t('Cooked/raw weight ratio')} value={cookedRatio} onChange={setCookedRatio} unit="" min={0.001}/>}
+          <NumericField label={t('Weight of one piece')} value={pieceWeight} onChange={setPieceWeight} unit={unit === 'ml' ? 'ml' : 'g'} required={false} placeholder={t('Optional')}/>
+        </div>
         <div className="cal-form-grid cal-form-grid-three">
-          <NumericField label={t('Price')} value={priceKronor} onChange={setPriceKronor} unit="kr" required={false} placeholder={t('Optional')}/>
-          <NumericField label={t('Price is for')} value={priceQuantity} onChange={setPriceQuantity} unit="" required={false}/>
+          <NumericField label={t(state === 'Cooked' ? 'Raw price' : 'Price')} value={priceKronor} onChange={setPriceKronor} unit="kr" required={false} placeholder={t('Optional')}/>
+          <NumericField label={t(state === 'Cooked' ? 'Raw amount' : 'Price is for')} value={priceQuantity} onChange={setPriceQuantity} unit="" required={false}/>
           <label>{t('Price unit')}<select value={unit === 'piece' || priceInPieces ? 'pieces' : 'unit'} onChange={event => setPriceInPieces(event.target.value === 'pieces')}>{unit !== 'piece' && <option value="unit">{unit === 'ml' ? 'ml' : 'g'}</option>}{(unit === 'piece' || hasPieceWeight || priceInPieces) && <option value="pieces">{t('pieces')}</option>}</select></label>
         </div>
         <div className="cal-form-section-label"><strong>{t('Nutrition per {amount}', { amount: `${baseQuantity || '—'} ${unitLabel(unit, Number(baseQuantity))}` })}</strong></div>

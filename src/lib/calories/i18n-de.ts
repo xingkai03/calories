@@ -737,4 +737,13 @@ export const DE: Record<string, string> = {
   'Add the weight of one piece to price this food per piece.': 'Gib das Gewicht eines Stücks ein, um einen Stückpreis festzulegen.',
   'Invalid food price.': 'Ungültiger Lebensmittelpreis.',
   'Invalid food price: a price per piece needs a piece weight.': 'Ungültiger Lebensmittelpreis: Ein Stückpreis braucht ein Stückgewicht.',
+  'Food state': 'Zustand',
+  'Enter a cooked/raw weight ratio greater than zero.': 'Gib ein Verhältnis gekocht/roh größer als null ein.',
+  'Cooked/raw weight ratio': 'Gewichtsverhältnis gekocht/roh',
+  'Raw price': 'Preis (roh)',
+  'Raw amount': 'Rohmenge',
+  'State of ingredient {number}': 'Zustand von Zutat {number}',
+  'Cooked/raw {ratio}': 'Gekocht/roh {ratio}',
+  '{amount} raw': '{amount} roh',
+  'Invalid cooked/raw weight ratio: only a cooked food has one.': 'Ungültiges Verhältnis gekocht/roh: Nur gekochte Lebensmittel haben eines.',
 };

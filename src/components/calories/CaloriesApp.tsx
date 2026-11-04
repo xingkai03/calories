@@ -577,7 +577,7 @@ export default function CaloriesApp({ clientOverride }: { clientOverride?: Retur
   const lastQuantities = useMemo(() => {
     const latest = new Map<string, Entry>();
     for (const entry of data.entries) if (entry.source !== 'manual') { const seen = latest.get(entry.foodId); if (!seen || entry.date >= seen.date) latest.set(entry.foodId, entry); }
-    return Object.fromEntries([...latest].map(([foodId, entry]) => [foodId, { quantity: entry.quantity, ...(entry.pieces !== undefined ? { pieces: entry.pieces } : {}) }]));
+    return Object.fromEntries([...latest].map(([foodId, entry]) => [foodId, { quantity: entry.quantity, ...(entry.pieces !== undefined ? { pieces: entry.pieces } : {}), state: entry.state }]));
   }, [data.entries]);
   const libraryIds = useMemo(() => new Set(data.foods.map(food => food.id)), [data.foods]);
 

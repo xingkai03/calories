@@ -734,4 +734,13 @@ export const ZH_CN: Record<string, string> = {
   'Add the weight of one piece to price this food per piece.': '要按个计价，请先填写单个重量。',
   'Invalid food price.': '食物价格无效。',
   'Invalid food price: a price per piece needs a piece weight.': '食物价格无效：按个计价需要单个重量。',
+  'Food state': '食物状态',
+  'Enter a cooked/raw weight ratio greater than zero.': '请输入大于零的熟/生重量比。',
+  'Cooked/raw weight ratio': '熟/生重量比',
+  'Raw price': '生重价格',
+  'Raw amount': '生重数量',
+  'State of ingredient {number}': '食材 {number} 的状态',
+  'Cooked/raw {ratio}': '熟/生 {ratio}',
+  '{amount} raw': '{amount}（生）',
+  'Invalid cooked/raw weight ratio: only a cooked food has one.': '熟/生重量比无效：只有熟食才有此比例。',
 };

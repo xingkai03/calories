@@ -7,7 +7,9 @@ export interface Macros { carbs: number; protein: number; fat: number; fiber: nu
 /** What the food costs: kronor (SEK) for a quantity in the food's unit, or a count of pieces when pieces is true
  * (only on a gram or millilitre food with a piece weight). */
 export interface FoodPrice { kronor: number; quantity: number; pieces?: true }
-export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState; pieceWeight?: number; price?: FoodPrice }
+/** A cooked food has a raw state too. Its nutrition, piece weight and unit describe the cooked state;
+ * cookedRatio is the cooked weight divided by the raw weight (1 until changed), and price is always for the raw state. */
+export interface Food extends Macros { id: string; name: string; baseQuantity: number; unit: Unit; state: FoodState; cookedRatio?: number; pieceWeight?: number; price?: FoodPrice }
 /** quantity is always in unit; pieces records how many pieces it was when logged by the piece.
  * bankPortion records the food-bank portion an entry was eaten from, so removing it returns it to the bank. */
 export interface Entry extends Macros { id: string; date: string; meal: string; foodId: string; foodName: string; quantity: number; unit: Unit; state: FoodState; pieces?: number; source?: 'manual'; bankPortion?: BankOrigin }
@@ -71,6 +73,19 @@ export function macrosForFood(food: Food, quantity: number): Macros {
   return { carbs: food.carbs * ratio, protein: food.protein * ratio, fat: food.fat * ratio, fiber: food.fiber * ratio, calories: food.calories * ratio };
 }
 
+/** Cooked foods are the ones with two states, cooked and raw. */
+export function hasRawState(food: Pick<Food, 'state'>): boolean { return food.state === 'Cooked'; }
+
+/** The food as it is in one of its states. The raw state of a cooked food has the nutrition of the raw
+ * weight that cooks into the cooked amount: per gram raw it holds cookedRatio times the cooked values. */
+export function foodInState(food: Food, wanted: FoodState): Food {
+  if (wanted === food.state) return food;
+  if (wanted !== 'Raw' || !hasRawState(food)) throw new Error(`${food.name} has no ${wanted.toLowerCase()} state.`);
+  const ratio = food.cookedRatio ?? 1;
+  const { cookedRatio: _ratio, pieceWeight, ...rest } = food;
+  return { ...rest, state: 'Raw', carbs: food.carbs * ratio, protein: food.protein * ratio, fat: food.fat * ratio, fiber: food.fiber * ratio, calories: food.calories * ratio, ...(pieceWeight !== undefined ? { pieceWeight: pieceWeight / ratio } : {}) };
+}
+
 /** A food logged by the piece needs a piece weight in grams or millilitres. */
 export function canLogPieces(food: Pick<Food, 'unit' | 'pieceWeight'>): boolean {
   return food.unit !== 'piece' && food.pieceWeight !== undefined && food.pieceWeight > 0;
@@ -104,6 +119,14 @@ function unit(value: unknown): Unit {
 function state(value: unknown): FoodState {
   if (value !== 'Raw' && value !== 'Cooked' && value !== 'As served') throw new Error('Invalid food state.');
   return value;
+}
+/** Every cooked food has a raw state; one saved before the ratio existed starts at 1 (cooked weight = raw weight). */
+function cookedRatio(value: unknown, foodState: FoodState): { cookedRatio?: number } {
+  if (foodState !== 'Cooked') {
+    if (value !== undefined) throw new Error('Invalid cooked/raw weight ratio: only a cooked food has one.');
+    return {};
+  }
+  return { cookedRatio: value === undefined ? 1 : number(value, 'cooked/raw weight ratio', true) };
 }
 function pieceWeight(value: unknown, foodUnit: Unit): { pieceWeight?: number } {
   if (value === undefined) return {};
@@ -191,7 +214,8 @@ export function normalizeData(raw: unknown): TrackerData {
     const nutrients = macros(f);
     const foodUnit = unit(f.unit);
     const weight = pieceWeight(f.pieceWeight, foodUnit);
-    return { id: text(f.id, 'food ID'), name: text(f.name, 'food name'), baseQuantity: number(f.baseQuantity, 'base quantity', true), unit: foodUnit, state: state(f.state), ...weight, ...price(f.price, { unit: foodUnit, ...weight }), ...nutrients, calories: number(energyFromMacros(nutrients), 'calculated calories') };
+    const foodState = state(f.state);
+    return { id: text(f.id, 'food ID'), name: text(f.name, 'food name'), baseQuantity: number(f.baseQuantity, 'base quantity', true), unit: foodUnit, state: foodState, ...cookedRatio(f.cookedRatio, foodState), ...weight, ...price(f.price, { unit: foodUnit, ...weight }), ...nutrients, calories: number(energyFromMacros(nutrients), 'calculated calories') };
   });
   const entries: Entry[] = Array.from(v.entries).map(rawEntry => {
     const e = record(rawEntry);

@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { canLogPieces, energyFromMacros, macrosForFood, quantityFromPieces, type BankItem, type BankPortion, type Food, type Macros } from '../../lib/calories/model';
+import { canLogPieces, energyFromMacros, foodInState, hasRawState, macrosForFood, quantityFromPieces, type BankItem, type BankPortion, type Food, type Macros } from '../../lib/calories/model';
 import { groupFoodBankPortions, nutritionForGrams, prepareFoodBankBatch, prepareFoodBankPortions, type BankIngredientInput } from '../../lib/calories/food-bank';
 import { mealForTime } from '../../lib/calories/food-order';
 import { DraftRestoredNotice, usePersistentFormDraft } from './FormDrafts';
@@ -55,7 +55,7 @@ export function FoodBankView({ portions, onPrepare, onEat, onRemove }: { portion
 type EstimateDraft = { protein: string; carbs: string; fat: string; fiber: string };
 const emptyEstimate = (): EstimateDraft => ({ protein: '', carbs: '', fat: '', fiber: '' });
 /** byPiece and the manual estimate fields are optional so older drafts still restore. */
-interface IngredientDraft { key: number; foodId: string; query: string; quantity: string; byPiece?: boolean; manual?: boolean; estimateName?: string; estimate?: EstimateDraft }
+interface IngredientDraft { key: number; foodId: string; query: string; quantity: string; byPiece?: boolean; raw?: boolean; manual?: boolean; estimateName?: string; estimate?: EstimateDraft }
 const estimateNumber = (value: string) => value.trim() === '' ? 0 : Number(value);
 const validEstimate = (estimate: EstimateDraft) => Object.values(estimate).every(value => { const parsed = estimateNumber(value); return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1e8; });
 const estimateMacros = (estimate: EstimateDraft) => { const values = { protein: estimateNumber(estimate.protein), carbs: estimateNumber(estimate.carbs), fat: estimateNumber(estimate.fat), fiber: estimateNumber(estimate.fiber) }; return { ...values, calories: energyFromMacros(values) }; };
@@ -73,7 +73,9 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const matches = (food: Food, query: string) => food.name.toLowerCase().includes(query.trim().toLowerCase());
-  const selectedFood = (ingredient: IngredientDraft) => foods.find(food => food.id === ingredient.foodId && matches(food, ingredient.query));
+  const libraryFood = (ingredient: IngredientDraft) => foods.find(food => food.id === ingredient.foodId && matches(food, ingredient.query));
+  // A cooked food can go in by its raw weight; the ingredient then uses the food's raw state.
+  const selectedFood = (ingredient: IngredientDraft) => { const food = libraryFood(ingredient); return food && ingredient.raw && hasRawState(food) ? foodInState(food, 'Raw') : food; };
   // An ingredient whose food has a piece weight starts in pieces, as in the log form.
   const inPieces = (ingredient: IngredientDraft, food = selectedFood(ingredient)) => Boolean(food && canLogPieces(food) && (ingredient.byPiece ?? true));
   const amountOf = (ingredient: IngredientDraft, food: Food, value: number) => inPieces(ingredient, food) ? quantityFromPieces(food, value) : value;
@@ -94,7 +96,9 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
   // Without a weighed total, a batch weighs what its gram ingredients add up to.
   const ingredientGrams = ingredients.reduce((total, ingredient) => {
     const food = !ingredient.manual ? selectedFood(ingredient) : undefined, value = Number(ingredient.quantity);
-    return food?.unit === 'g' && ingredient.quantity.trim() && Number.isFinite(value) && value > 0 ? total + amountOf(ingredient, food, value) : total;
+    // Raw grams count as the cooked weight they become.
+    const cooked = food && ingredient.raw ? libraryFood(ingredient)?.cookedRatio ?? 1 : 1;
+    return food?.unit === 'g' && ingredient.quantity.trim() && Number.isFinite(value) && value > 0 ? total + amountOf(ingredient, food, value) * cooked : total;
   }, 0);
   const batchWeight = totalWeight.trim() ? Number(totalWeight) : ingredientGrams;
   const validBatchWeight = Number.isFinite(batchWeight) && batchWeight > 0 && batchWeight <= 1e8;
@@ -105,7 +109,7 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
   }
   function filterIngredient(key: number, query: string) {
     const first = foods.find(food => matches(food, query));
-    updateIngredient(key, current => first?.id === current.foodId ? { ...current, query } : { ...current, query, foodId: first?.id ?? '', quantity: '', byPiece: undefined });
+    updateIngredient(key, current => first?.id === current.foodId ? { ...current, query } : { ...current, query, foodId: first?.id ?? '', quantity: '', byPiece: undefined, raw: undefined });
   }
   function changeIngredientSource(key: number, manual: boolean) {
     updateIngredient(key, current => ({ ...current, manual, estimateName: current.estimateName ?? '', estimate: current.estimate ?? emptyEstimate() }));
@@ -119,6 +123,14 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
     // Convert what was typed so the portion stays the same.
     const quantity = ingredient.quantity.trim() && Number.isFinite(value) && value > 0 ? String(Math.round((pieces ? value / food.pieceWeight : value * food.pieceWeight) * 100) / 100) : ingredient.quantity;
     updateIngredient(ingredient.key, current => ({ ...current, quantity, byPiece: pieces }));
+  }
+  function changeIngredientState(ingredient: IngredientDraft, raw: boolean) {
+    const food = libraryFood(ingredient);
+    if (!food || !hasRawState(food) || Boolean(ingredient.raw) === raw) return;
+    const value = Number(ingredient.quantity), ratio = food.cookedRatio ?? 1;
+    // Convert what was typed so the portion stays the same; a count of pieces stays as it is.
+    const quantity = !inPieces(ingredient) && ingredient.quantity.trim() && Number.isFinite(value) && value > 0 ? String(Math.round((raw ? value / ratio : value * ratio) * 100) / 100) : ingredient.quantity;
+    updateIngredient(ingredient.key, current => ({ ...current, quantity, raw }));
   }
   function addIngredient() {
     if (ingredients.length >= 50) return;
@@ -136,7 +148,7 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
     if (byWeight ? !validBatchWeight : !Number.isInteger(Number(count)) || Number(count) < 1 || Number(count) > 100) { setError(t(byWeight ? 'Enter the total weight of the food in grams.' : 'Prepare between 1 and 100 whole portions.')); return; }
     try {
       let generatedId = 0;
-      const inputs = ingredients.map((ingredient): BankIngredientInput => ingredient.manual ? { manual: { name: ingredient.estimateName ?? '', ...estimateMacros(ingredient.estimate ?? emptyEstimate()) } } : inPieces(ingredient) ? { foodId: ingredient.foodId, pieces: Number(ingredient.quantity) } : { foodId: ingredient.foodId, quantity: Number(ingredient.quantity) });
+      const inputs = ingredients.map((ingredient): BankIngredientInput => ingredient.manual ? { manual: { name: ingredient.estimateName ?? '', ...estimateMacros(ingredient.estimate ?? emptyEstimate()) } } : { foodId: ingredient.foodId, ...(inPieces(ingredient) ? { pieces: Number(ingredient.quantity) } : { quantity: Number(ingredient.quantity) }), ...(ingredient.raw && selectedFood(ingredient)?.state === 'Raw' ? { state: 'Raw' as const } : {}) });
       const makeId = () => `${form.draft.draftBatchId}:${generatedId++}`;
       const prepared = byWeight ? prepareFoodBankBatch(foods, inputs, batchWeight, name.trim() || autoName, makeId) : prepareFoodBankPortions(foods, inputs, Number(count), name.trim() || autoName, makeId);
       setSubmitting(true);
@@ -168,8 +180,9 @@ export function FoodBankEditor({ foods, onSave, onClose }: { foods: readonly Foo
           <div className="cal-form-grid"><NumericField label={t('Protein')} value={estimate.protein} onChange={value => changeEstimate(ingredient.key, 'protein', value)} required={false} placeholder="0"/><NumericField label={t('Carbohydrate')} value={estimate.carbs} onChange={value => changeEstimate(ingredient.key, 'carbs', value)} required={false} placeholder="0"/><NumericField label={t('Fat')} value={estimate.fat} onChange={value => changeEstimate(ingredient.key, 'fat', value)} required={false} placeholder="0"/><NumericField label={t('Fibre')} value={estimate.fiber} onChange={value => changeEstimate(ingredient.key, 'fiber', value)} required={false} placeholder="0"/></div>
           <div className="cal-bank-estimate-footer"><small>{t(byWeight ? '{kcal} kcal in the batch' : '{kcal} kcal per portion', { kcal: number(validEstimate(estimate) ? estimateMacros(estimate).calories : 0, 0) })}</small>{ingredients.length > 1 && <button className="cal-icon-button cal-bank-touch" type="button" aria-label={t('Remove ingredient {number}', { number: index + 1 })} onClick={() => { setIngredients(current => current.filter(item => item.key !== ingredient.key)); setError(''); }}><BankIcon name="trash" size={17}/></button>}</div>
           </div> : <div className="cal-bank-ingredient-fields">
-          <div className="cal-food-picker"><label htmlFor={`${fieldId}-search`}>{t('Food')}</label><div className="cal-food-picker-controls"><input id={`${fieldId}-search`} type="text" value={ingredient.query} onChange={event => filterIngredient(ingredient.key, event.target.value)} placeholder={t('Filter food names')} autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={`${fieldId}-matches`}/><select aria-label={t('Food for ingredient {number}', { number: index + 1 })} value={food?.id ?? ''} onChange={event => updateIngredient(ingredient.key, current => event.target.value === current.foodId ? current : { ...current, foodId: event.target.value, quantity: '', byPiece: undefined })} disabled={filtered.length === 0} required>{filtered.length === 0 && <option value="" disabled>{t('No matching foods')}</option>}{filtered.map(food => <option key={food.id} value={food.id}>{food.name} · {stateLabel(food.state)}</option>)}</select></div><small className="cal-bank-match-count" id={`${fieldId}-matches`} role="status">{filtered.length === 0 ? t('No matching foods') : ingredient.query.trim() ? t(filtered.length === 1 ? '{count} matching food' : '{count} matching foods', { count: filtered.length }) : ''}</small></div>
+          <div className="cal-food-picker"><label htmlFor={`${fieldId}-search`}>{t('Food')}</label><div className="cal-food-picker-controls"><input id={`${fieldId}-search`} type="text" value={ingredient.query} onChange={event => filterIngredient(ingredient.key, event.target.value)} placeholder={t('Filter food names')} autoComplete="off" autoCapitalize="none" spellCheck={false} aria-describedby={`${fieldId}-matches`}/><select aria-label={t('Food for ingredient {number}', { number: index + 1 })} value={food?.id ?? ''} onChange={event => updateIngredient(ingredient.key, current => event.target.value === current.foodId ? current : { ...current, foodId: event.target.value, quantity: '', byPiece: undefined, raw: undefined })} disabled={filtered.length === 0} required>{filtered.length === 0 && <option value="" disabled>{t('No matching foods')}</option>}{filtered.map(food => <option key={food.id} value={food.id}>{food.name} · {stateLabel(food.state)}</option>)}</select></div><small className="cal-bank-match-count" id={`${fieldId}-matches`} role="status">{filtered.length === 0 ? t('No matching foods') : ingredient.query.trim() ? t(filtered.length === 1 ? '{count} matching food' : '{count} matching foods', { count: filtered.length }) : ''}</small></div>
           <label>{t(byWeight ? 'Amount in the batch' : 'Amount per portion')}<span className="cal-unit-input"><input type="number" inputMode="decimal" value={ingredient.quantity} onChange={event => updateIngredient(ingredient.key, current => ({ ...current, quantity: event.target.value }))} placeholder={t('Amount')} min={0.001} max={100000000} step="any" required aria-describedby={`${id}-amounts`}/><span>{food ? inPieces(ingredient, food) ? t('pieces') : food.unit : '—'}</span></span></label>
+          {food && hasRawState(libraryFood(ingredient) ?? food) && <div className="cal-entry-mode-switch cal-amount-unit-switch" role="group" aria-label={t('State of ingredient {number}', { number: index + 1 })}>{[false, true].map(raw => <button key={String(raw)} type="button" className={Boolean(ingredient.raw) === raw ? 'is-active' : ''} aria-pressed={Boolean(ingredient.raw) === raw} onClick={() => changeIngredientState(ingredient, raw)}>{stateLabel(raw ? 'Raw' : 'Cooked')}</button>)}</div>}
           {food && canLogPieces(food) && <div className="cal-entry-mode-switch cal-amount-unit-switch" role="group" aria-label={t('Amount of ingredient {number} in', { number: index + 1 })}>{[true, false].map(pieces => <button key={String(pieces)} type="button" className={inPieces(ingredient, food) === pieces ? 'is-active' : ''} aria-pressed={inPieces(ingredient, food) === pieces} onClick={() => changeIngredientUnit(ingredient, food, pieces)}>{pieces ? t('Pieces ({weight} each)', { weight: `${number(food.pieceWeight ?? 0, 2)} ${food.unit}` }) : t(food.unit === 'ml' ? 'Millilitres' : 'Grams')}</button>)}</div>}
           {ingredients.length > 1 && <button className="cal-icon-button cal-bank-touch cal-bank-remove-ingredient" type="button" aria-label={t('Remove ingredient {number}', { number: index + 1 })} onClick={() => { setIngredients(current => current.filter(item => item.key !== ingredient.key)); setError(''); }}><BankIcon name="trash" size={17}/></button>}
         </div>}</fieldset>;

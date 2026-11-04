@@ -1,4 +1,4 @@
-import { canLogPieces, emptyData, energyFromMacros, macrosForFood, normalizeData, quantityFromPieces, settingsForDay, type BankItem, type BankPortion, type Entry, type Food, type Macros, type TrackerData } from './model.ts';
+import { canLogPieces, emptyData, energyFromMacros, foodInState, macrosForFood, normalizeData, quantityFromPieces, settingsForDay, type BankItem, type BankPortion, type Entry, type Food, type FoodState, type Macros, type TrackerData } from './model.ts';
 
 function positiveQuantity(value: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1e8) throw new Error('Enter a finite positive ingredient quantity.');
@@ -12,7 +12,8 @@ function nonNegative(value: number, label: string): number {
 
 /** A manual estimate gives one portion's nutrient totals directly, like a manual journal entry. */
 export interface ManualIngredient { manual: { name: string; protein: number; carbs: number; fat: number; fiber: number } }
-export type BankIngredientInput = { foodId: string; quantity?: number; pieces?: number } | ManualIngredient;
+/** state picks the raw state of a cooked food; absent means the food's own state. */
+export type BankIngredientInput = { foodId: string; quantity?: number; pieces?: number; state?: FoodState } | ManualIngredient;
 
 type Snapshot = Omit<BankItem, 'id' | 'foodId'> & { foodId: string | null };
 function ingredientSnapshots(foods: readonly Food[], ingredients: readonly BankIngredientInput[]): Snapshot[] {
@@ -27,8 +28,9 @@ function ingredientSnapshots(foods: readonly Food[], ingredients: readonly BankI
       const nutrients = { protein: nonNegative(values.protein, 'protein'), carbs: nonNegative(values.carbs, 'carbohydrate'), fat: nonNegative(values.fat, 'fat'), fiber: nonNegative(values.fiber, 'fibre') };
       return { foodId: null, foodName: estimateName.trim(), quantity: 1, unit: 'piece' as const, state: 'As served' as const, ...nutrients, calories: energyFromMacros(nutrients) };
     }
-    const food = library.get(ingredient.foodId);
-    if (!food) throw new Error('Choose an existing food for each ingredient.');
+    const libraryFood = library.get(ingredient.foodId);
+    if (!libraryFood) throw new Error('Choose an existing food for each ingredient.');
+    const food = ingredient.state === undefined ? libraryFood : foodInState(libraryFood, ingredient.state);
     if (ingredient.pieces !== undefined && !canLogPieces(food)) throw new Error(`${food.name} has no piece weight. Enter its amount in ${food.unit}.`);
     const pieces = ingredient.pieces === undefined ? undefined : positiveQuantity(ingredient.pieces);
     const quantity = positiveQuantity(pieces === undefined ? ingredient.quantity as number : quantityFromPieces(food, pieces));

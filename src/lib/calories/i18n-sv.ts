@@ -737,4 +737,13 @@ export const SV: Record<string, string> = {
   'Add the weight of one piece to price this food per piece.': 'Ange vikten per styck för att sätta ett styckpris.',
   'Invalid food price.': 'Ogiltigt pris.',
   'Invalid food price: a price per piece needs a piece weight.': 'Ogiltigt pris: ett styckpris kräver en styckvikt.',
+  'Food state': 'Tillstånd',
+  'Enter a cooked/raw weight ratio greater than zero.': 'Ange ett förhållande tillagad/rå som är större än noll.',
+  'Cooked/raw weight ratio': 'Viktförhållande tillagad/rå',
+  'Raw price': 'Pris (rå)',
+  'Raw amount': 'Rå mängd',
+  'State of ingredient {number}': 'Tillstånd för ingrediens {number}',
+  'Cooked/raw {ratio}': 'Tillagad/rå {ratio}',
+  '{amount} raw': '{amount} rå',
+  'Invalid cooked/raw weight ratio: only a cooked food has one.': 'Ogiltigt förhållande tillagad/rå: bara tillagade livsmedel har ett.',
 };

@@ -156,6 +156,7 @@ test('foods can be ranked by frequency, most recent use or name', () => {
 test('food usage lists every library log newest first and totals what was eaten', () => {
   const entries = [
     entry('a', 'rice', '2026-10-01', { quantity: 150, calories: 200 }),
+    entry('r', 'rice', '2026-10-02', { quantity: 40, calories: 140, state: 'Raw' }),
     entry('b', 'rice', '2026-10-12', { quantity: 100, calories: 130, meal: 'Dinner' }),
     entry('c', 'rice', '2026-10-12', { quantity: 50, calories: 65, meal: 'Breakfast' }),
     entry('d', 'rice', '2026-10-13', { quantity: 1, unit: 'piece', calories: 90 }),
@@ -164,15 +165,15 @@ test('food usage lists every library log newest first and totals what was eaten'
     entry('other', 'oats', '2026-10-13'),
   ];
   const usage = foodUsage(entries, 'rice', '2026-10-14');
-  assert.deepEqual(usage.entries.map(item => item.id), ['planned', 'd', 'c', 'b', 'a']);
-  assert.equal(usage.count, 4);
-  assert.equal(usage.days, 3);
+  assert.deepEqual(usage.entries.map(item => item.id), ['planned', 'd', 'c', 'b', 'r', 'a']);
+  assert.equal(usage.count, 5);
+  assert.equal(usage.days, 4);
   assert.equal(usage.firstDate, '2026-10-01');
   assert.equal(usage.lastDate, '2026-10-13');
-  assert.deepEqual(usage.amounts, [{ unit: 'piece', quantity: 1, count: 1 }, { unit: 'g', quantity: 300, count: 3 }], 'units in order of most recent use');
-  assert.equal(usage.calories, 485);
+  assert.deepEqual(usage.amounts, [{ unit: 'piece', state: 'Cooked', quantity: 1, count: 1 }, { unit: 'g', state: 'Cooked', quantity: 300, count: 3 }, { unit: 'g', state: 'Raw', quantity: 40, count: 1 }], 'units and states in order of most recent use; raw and cooked weights apart');
+  assert.equal(usage.calories, 625);
   assert.equal(usage.last7, 3);
-  assert.equal(usage.last30, 4);
+  assert.equal(usage.last30, 5);
   assert.deepEqual(foodUsage(entries, 'missing', '2026-10-14'), { entries: [], count: 0, days: 0, firstDate: null, lastDate: null, amounts: [], calories: 0, last7: 0, last30: 0 });
 });
 

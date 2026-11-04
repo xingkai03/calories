@@ -100,7 +100,9 @@ test('loading a legacy v1 journal migrates it in memory without writing or losin
   const loaded = opened.data;
   assert.equal(loaded.version, 2);
   assert.deepEqual(loaded.foodBank, []);
-  for (const field of ['foods', 'entries', 'days', 'defaults']) assert.deepEqual(loaded[field], legacy[field]);
+  for (const field of ['entries', 'days', 'defaults']) assert.deepEqual(loaded[field], legacy[field]);
+  // A cooked food saved before raw states existed gains a raw state at ratio 1.
+  assert.deepEqual(loaded.foods, legacy.foods.map(food => food.state === 'Cooked' ? { ...food, cookedRatio: 1 } : food));
   assert.equal(loaded.entries[0].calories, 331.125, 'historical energy is not recalculated during the format migration');
   assert.equal(cloud.state.data.version, 1, 'loading alone does not rewrite the server document');
   assert.equal(cloud.state.revision, 7);

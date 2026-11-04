@@ -1,4 +1,4 @@
-import { addDays, type Entry, type Food, type FoodListPreferences, type Unit } from './model.ts';
+import { addDays, type Entry, type Food, type FoodListPreferences, type FoodState, type Unit } from './model.ts';
 
 const isLibraryLog = (entry: Entry) => entry.source !== 'manual' && entry.foodId !== `manual:${entry.id}`;
 
@@ -24,14 +24,15 @@ export function rankFoods(foods: readonly Food[], entries: readonly Entry[], cur
   return { foods: [...foods].sort(compare), usedIds: window ? usedIds : null };
 }
 
-export interface FoodUsage { entries: Entry[]; count: number; days: number; firstDate: string | null; lastDate: string | null; amounts: { unit: Unit; quantity: number; count: number }[]; calories: number; last7: number; last30: number }
+export interface FoodUsage { entries: Entry[]; count: number; days: number; firstDate: string | null; lastDate: string | null; amounts: { unit: Unit; state: FoodState; quantity: number; count: number }[]; calories: number; last7: number; last30: number }
 
 /** Every library log of one food, newest first. Planned future meals are listed but not counted as eaten. */
 export function foodUsage(entries: readonly Entry[], foodId: string, currentDay: string): FoodUsage {
   const logs = entries.filter(entry => entry.foodId === foodId && isLibraryLog(entry)).sort((a, b) => b.date.localeCompare(a.date) || a.meal.localeCompare(b.meal));
   const eaten = logs.filter(entry => entry.date <= currentDay);
-  const amounts = new Map<Unit, { unit: Unit; quantity: number; count: number }>();
-  for (const entry of eaten) { const total = amounts.get(entry.unit) ?? { unit: entry.unit, quantity: 0, count: 0 }; total.quantity += entry.quantity; total.count++; amounts.set(entry.unit, total); }
+  // Raw and cooked weights of one food are added up apart.
+  const amounts = new Map<string, { unit: Unit; state: FoodState; quantity: number; count: number }>();
+  for (const entry of eaten) { const key = `${entry.unit} ${entry.state}`, total = amounts.get(key) ?? { unit: entry.unit, state: entry.state, quantity: 0, count: 0 }; total.quantity += entry.quantity; total.count++; amounts.set(key, total); }
   const since = (days: number) => { const first = addDays(currentDay, 1 - days); return eaten.filter(entry => entry.date >= first).length; };
   return {
     entries: logs, count: eaten.length, days: new Set(eaten.map(entry => entry.date)).size,

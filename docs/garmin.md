@@ -12,7 +12,9 @@ Run `backend/calories/garmin.sql` after the existing setup. This creates private
 
 Deploy `backend/calories/garmin-edge/index.ts` as `calories-garmin-worker`. Set `verify_jwt = false`: its custom machine authentication checks a scoped credential through the service-only RPC before any operation. The Edge runtime's service-role key remains server-side. Request bodies, tokens, raw Garmin errors, and health values are not logged.
 
-Copy `backend/calories/garmin-sync/{worker.py,requirements.lock}` and `workflow.yml` (as `.github/workflows/sync.yml`) into the private `xingkai03/calories-garmin-sync` repository. The private repository keeps logs private and avoids GitHub's public-repository 60-day inactivity schedule suspension. `GARMIN_SYNC_ENDPOINT` is a repository variable. Hourly jobs run at minute 17, with read-only GitHub permissions and no cached tokens/artifacts. GitHub schedules can be delayed.
+Copy `backend/calories/garmin-sync/{worker.py,requirements.lock}` and `workflow.yml` (as `.github/workflows/sync.yml`) into the private `xingkai03/calories-garmin-sync` repository. The private repository keeps logs private and avoids GitHub's public-repository 60-day inactivity schedule suspension. `GARMIN_SYNC_ENDPOINT` is a repository variable. The workflow runs with read-only GitHub permissions and no cached tokens/artifacts.
+
+GitHub's `schedule:` trigger is best effort and often starts runs late or drops them, so the minute-17 cron alone can leave hours between syncs. For a reliable hourly sync, run `backend/calories/garmin-cron.sql` after `garmin.sql`. It uses Supabase `pg_cron` and `pg_net` to call GitHub's `workflow_dispatch` API at minute 5 of every hour. It needs a fine-grained GitHub token limited to `calories-garmin-sync` with **Actions: Read and write**, stored once in Supabase Vault as `calories_garmin_dispatch_token` (the script header has the exact statements). The GitHub schedule stays as a backup; the workflow's concurrency group and the server lease serialize any overlapping runs. If the token expires, the dispatch logs a 401 in `net._http_response` and only the GitHub schedule keeps running.
 
 ## One-time sign-in
 

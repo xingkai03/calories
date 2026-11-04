@@ -1,6 +1,8 @@
 # Deploy this workflow to the PRIVATE calories-garmin-sync repository only.
 name: Garmin calorie sync
 on:
+  # Backup only: GitHub delays or drops scheduled runs. garmin-cron.sql makes
+  # Supabase start this workflow hourly through workflow_dispatch.
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:

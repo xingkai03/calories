@@ -209,17 +209,15 @@ export function FoodEditor({ food, readPhotos, onSave, onClose }: { food?: Food;
           <label>{t('Unit')}<select value={unit} onChange={event => { const nextUnit = event.target.value as Food['unit']; setUnit(nextUnit); if (!food && !importedLabel) setBaseQuantity(nextUnit === 'piece' ? '1' : '100'); }} required><option value="" disabled>{t('Choose unit')}</option><option value="g">{t('grams (g)')}</option><option value="ml">{t('millilitres (ml)')}</option><option value="piece">{t('piece')}</option></select></label>
           <label>{t('State')}<select value={state} onChange={event => setState(event.target.value as Food['state'])}>{(['As served', 'Raw', 'Cooked'] as const).map(option => <option key={option} value={option}>{stateLabel(option)}</option>)}</select></label>
         </div>
-        <NumericField label={t('Weight of one piece')} value={pieceWeight} onChange={setPieceWeight} unit={unit === 'ml' ? 'ml' : 'g'} required={false} placeholder={t('Optional')} describedBy="cal-piece-weight-hint"/>
-        <p className="cal-field-hint" id="cal-piece-weight-hint">{t(unit === 'piece' ? 'Optional. Add it to also log this food in grams.' : 'Optional, e.g. 19 g for a slice. Lets you log this food in pieces or by weight.')}</p>
+        <NumericField label={t('Weight of one piece')} value={pieceWeight} onChange={setPieceWeight} unit={unit === 'ml' ? 'ml' : 'g'} required={false} placeholder={t('Optional')}/>
         <div className="cal-form-grid cal-form-grid-three">
-          <NumericField label={t('Price')} value={priceKronor} onChange={setPriceKronor} unit="kr" required={false} placeholder={t('Optional')} describedBy="cal-price-hint"/>
+          <NumericField label={t('Price')} value={priceKronor} onChange={setPriceKronor} unit="kr" required={false} placeholder={t('Optional')}/>
           <NumericField label={t('Price is for')} value={priceQuantity} onChange={setPriceQuantity} unit="" required={false}/>
           <label>{t('Price unit')}<select value={unit === 'piece' || priceInPieces ? 'pieces' : 'unit'} onChange={event => setPriceInPieces(event.target.value === 'pieces')}>{unit !== 'piece' && <option value="unit">{unit === 'ml' ? 'ml' : 'g'}</option>}{(unit === 'piece' || hasPieceWeight || priceInPieces) && <option value="pieces">{t('pieces')}</option>}</select></label>
         </div>
-        <p className="cal-field-hint" id="cal-price-hint">{t('Optional. What you paid in kronor and how much it bought, e.g. 32 kr for 500 g. Used to rank foods by what their protein costs.')}</p>
-        <div className="cal-form-section-label"><strong>{t('Nutrition per {amount}', { amount: `${baseQuantity || '—'} ${unitLabel(unit, Number(baseQuantity))}` })}</strong><p>{t('Enter the label’s values in grams. Leave blank for zero.')}</p></div>
+        <div className="cal-form-section-label"><strong>{t('Nutrition per {amount}', { amount: `${baseQuantity || '—'} ${unitLabel(unit, Number(baseQuantity))}` })}</strong></div>
         <div className="cal-form-grid"><NumericField label={t('Protein')} value={nutrients.protein} onChange={value => nutrient('protein', value)} required={false}/><NumericField label={t('Carbohydrate')} value={nutrients.carbs} onChange={value => nutrient('carbs', value)} required={false}/><NumericField label={t('Fat')} value={nutrients.fat} onChange={value => nutrient('fat', value)} required={false}/><NumericField label={t('Fibre')} value={nutrients.fiber} onChange={value => nutrient('fiber', value)} required={false}/></div>
-        <div className="cal-budget-preview" aria-live="polite"><span>{t('Calculated energy')}</span><strong><output aria-label={t('Calculated energy')}>{hasNutrients ? number(calories, 1) : '—'}</output> kcal</strong><p>{t('4 × protein + 4 × carbohydrate + 9 × fat')}</p></div>
+        <div className="cal-budget-preview" aria-live="polite"><strong><output aria-label={t('Calculated energy')}>{hasNutrients ? number(calories, 1) : '—'}</output> kcal</strong></div>
         {food && <p className="cal-field-hint">{t('Changes apply to future entries. Previously logged nutrition stays as recorded.')}</p>}
       </fieldset>
       {error && <p className="cal-form-error" role="alert">{error}</p>}

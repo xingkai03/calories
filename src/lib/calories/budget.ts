@@ -10,6 +10,8 @@ function finite(value: number, label: string, nonNegative = false): number {
 export const MAX_DAILY_DEFICIT = 1000;
 /** Each logged day's difference from its budget is paid back in this many equal parts. */
 export const CARRY_SPREAD_DAYS = 7;
+/** Most carry may take off one day's budget. Debt beyond this waits for later days, so a big balance is spread over more days. */
+export const MAX_DAILY_CARRY_CUT = 500;
 
 /** A day's food budget: base budget plus the carry spread in from earlier days, never below 0. */
 export function adjustedBudget(burned: number, deficit: number, carryIn = 0) {
@@ -35,7 +37,7 @@ export interface BalanceDay extends ReturnType<typeof adjustedBudget> {
 }
 export interface CalorieLedger { days: Record<string, BalanceDay>; completed: BalanceDay[]; provisional?: BalanceDay }
 
-/** Each day's difference is spread evenly over the next 7 days.
+/** Each day's difference is spread evenly over the next 7 days, but no day loses more than MAX_DAILY_CARRY_CUT to carry.
  * Unlogged days and planned future meals add nothing; today's difference only previews later days.
  * Derive everything from recorded intake, each day's targets and the latest burned readings,
  * so edits and Garmin corrections propagate without storing or counting carry twice. */
@@ -70,16 +72,53 @@ function contributing(date: string, ledger: CalorieLedger): BalanceDay | undefin
   return row && (row.settled || row === ledger.provisional) ? row : undefined;
 }
 
-/** The carry a day receives: one seventh of each of the previous 7 days' differences. */
-export function carryBefore(date: string, ledger: CalorieLedger): number {
+/** Calendar-day carry schedule for one ledger, filled in date order as days are asked for. */
+interface CarryStep { scheduled: number; carry: number; backlog: number }
+interface CarrySchedule { first: string; last: string; backlog: number; steps: Map<string, CarryStep> }
+const schedules = new WeakMap<CalorieLedger, CarrySchedule>();
+
+/** One seventh of each of the previous 7 days' differences, before the daily cut limit. */
+function scheduledCarry(date: string, ledger: CalorieLedger): number {
   let total = 0;
   for (let k = 1; k <= CARRY_SPREAD_DAYS; k++) total += contributing(addDays(date, -k), ledger)?.difference ?? 0;
   return total / CARRY_SPREAD_DAYS;
 }
 
+const ZERO_STEP: CarryStep = { scheduled: 0, carry: 0, backlog: 0 };
+
+/** The carry a day receives and the debt left waiting after it.
+ * Each day takes its scheduled share plus any debt still waiting, but never more than MAX_DAILY_CARRY_CUT off its budget;
+ * the rest waits for the next day. Rows are only ever added in date order, so earlier steps stay valid. */
+export function carryStep(date: string, ledger: CalorieLedger): CarryStep {
+  let schedule = schedules.get(ledger);
+  if (!schedule) {
+    const first = Object.keys(ledger.days).sort()[0];
+    if (!first) return ZERO_STEP;
+    schedule = { first, last: first, backlog: 0, steps: new Map([[first, { scheduled: 0, carry: 0, backlog: 0 }]]) };
+    schedules.set(ledger, schedule);
+  }
+  if (date <= schedule.first) return date === schedule.first ? schedule.steps.get(date)! : ZERO_STEP;
+  while (schedule.last < date) {
+    const day = addDays(schedule.last, 1);
+    const scheduled = scheduledCarry(day, ledger);
+    const due = scheduled + schedule.backlog;
+    const carry = Math.max(-MAX_DAILY_CARRY_CUT, due);
+    const left = due - carry;
+    schedule.backlog = Math.abs(left) < 1e-9 ? 0 : left;
+    schedule.steps.set(day, { scheduled, carry, backlog: schedule.backlog });
+    schedule.last = day;
+  }
+  return schedule.steps.get(date)!;
+}
+
+/** The carry a day receives: one seventh of each of the previous 7 days' differences plus waiting debt, at most MAX_DAILY_CARRY_CUT off. */
+export function carryBefore(date: string, ledger: CalorieLedger): number {
+  return carryStep(date, ledger).carry;
+}
+
 /** Carry still owed to (or by) days after `date`, counting `ownDifference` for the day itself. */
 export function outstandingAfter(date: string, ledger: CalorieLedger, ownDifference = 0): number {
-  let total = ownDifference;
+  let total = ownDifference + carryStep(date, ledger).backlog;
   for (let k = 1; k < CARRY_SPREAD_DAYS; k++) total += (contributing(addDays(date, -k), ledger)?.difference ?? 0) * (CARRY_SPREAD_DAYS - k) / CARRY_SPREAD_DAYS;
   return total;
 }

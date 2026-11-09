@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CARRY_SPREAD_DAYS, MAX_DAILY_DEFICIT, adjustedBudget, calorieLedger, carryBefore, outstandingAfter } from '../../src/lib/calories/budget.ts';
+import { CARRY_SPREAD_DAYS, MAX_DAILY_CARRY_CUT, MAX_DAILY_DEFICIT, carryStep, adjustedBudget, calorieLedger, carryBefore, outstandingAfter } from '../../src/lib/calories/budget.ts';
 import { emptyData, manualMealEntry } from '../../src/lib/calories/model.ts';
 import { effectiveBurned } from '../../src/lib/calories/garmin.ts';
 
@@ -343,4 +343,36 @@ test('the difference spread over seven days is conserved exactly', () => {
   close(totalCarry, totalDifference, 'every kcal over or under comes back once, no more, no less');
   close(rows.at(-1).balance, 0);
   close(outstandingAfter('2026-10-08', ledger, rows[7].difference), rows[7].balance);
+});
+
+test('a debt too big for seven days is spread over more days, at most 500 kcal off each day', () => {
+  assert.equal(MAX_DAILY_CARRY_CUT, 500);
+  const dates = range('2026-10-01', 14);
+  const ledger = eatAgainstBudget(dates, [7000], kai, '2026-10-30');
+  const rows = dates.map(date => ledger.days[date]);
+  // 1000 a day is scheduled for 7 days; only 500 is taken, the rest waits and is taken after the week.
+  closeAll(rows.map(row => row.carryIn), [0, ...Array(13).fill(-500)]);
+  closeAll(rows.map(row => row.balance), dates.map((_, index) => -7000 + 500 * index));
+  close(carryStep(dates[3], ledger).backlog, -1500, 'three days of 500 kcal not yet taken');
+  const after = calorieLedger(dataWith([...dates, ...range('2026-10-15', 2)].map((date, index) => meal(date, index === 0 ? 1840 + 7000 : 1840 - 500)), kai), [], '2026-10-30');
+  close(after.days['2026-10-15'].carryIn, -500, 'the fourteenth day of payback');
+  close(after.days['2026-10-15'].balance, 0);
+  close(after.days['2026-10-16'].carryIn, 0, 'back to base once the debt is paid');
+});
+
+test('waiting debt keeps draining on unlogged days, and surplus days pay it off', () => {
+  const ledger = calorieLedger(dataWith([meal('2026-10-01', 1840 + 7000), meal('2026-10-03', 1840 - 500 + 1000)], kai), [], '2026-10-30');
+  close(carryBefore('2026-10-02', ledger), -500);
+  close(ledger.days['2026-10-03'].carryIn, -500);
+  close(ledger.days['2026-10-03'].difference, -1000);
+  close(carryBefore('2026-10-17', ledger), -500, 'unlogged days still take their share');
+  close(carryBefore('2026-10-18', ledger), 0, 'paid back after 16 days: 8000 kcal at 500 a day');
+  close(outstandingAfter('2026-10-16', ledger), -500);
+  close(outstandingAfter('2026-10-17', ledger), 0);
+  // Eating 1000 under on day 2 cancels 1000 of the waiting debt.
+  const undereating = calorieLedger(dataWith([meal('2026-10-01', 1840 + 7000), meal('2026-10-02', 1340 - 1000)], kai), [], '2026-10-30');
+  close(undereating.days['2026-10-02'].balance, -7000 + 500 + 1000);
+  close(carryBefore('2026-10-03', undereating), -500);
+  close(carryBefore('2026-10-13', undereating), -500, 'remaining debt still at most 500 a day');
+  close(carryBefore('2026-10-14', undereating), 0, '5500 left after day 2 takes 11 days of 500');
 });

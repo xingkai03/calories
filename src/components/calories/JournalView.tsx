@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { addDays, dayTotals, type DaySettings, type Entry } from '../../lib/calories/model';
 import type { EffectiveBurned, GarminSnapshot } from '../../lib/calories/garmin';
 import { DAILY_PROTEIN_GRAMS, macroTargets, nutrientProgress } from '../../lib/calories/nutrition';
-import { adjustedBudget, outstandingAfter, CARRY_SPREAD_DAYS, type CalorieLedger } from '../../lib/calories/budget';
+import { adjustedBudget, carryStep, outstandingAfter, CARRY_SPREAD_DAYS, MAX_DAILY_CARRY_CUT, type CalorieLedger } from '../../lib/calories/budget';
 import { Icon, number, signedNumber, readableDate, syncTime, burnedLabel, burnedFormula, burnedSyncTime, staleImport, garminStatusLabel, amountLabel, mealLabel, stateLabel } from './ui';
 import { t, inSentence } from '../../lib/calories/i18n';
 import type { ModalState } from './CaloriesApp';
@@ -21,6 +21,7 @@ export default function JournalView({ date, currentDay, dayEntries, targets, bur
   const remaining = budget - totals.calories;
   const selectedBalance = ledger.days[date];
   const rawBalance = selectedBalance ? selectedBalance.balance : outstandingAfter(date, ledger);
+  const waitingDebt = -carryStep(date, ledger).backlog;
   const hasPendingLoggedDays = Object.values(ledger.days).some(row => row.date < currentDay && !row.available);
   const deficit = burned.burned - totals.calories;
   const calorieProgress = nutrientProgress(totals.calories, budget);
@@ -54,9 +55,10 @@ export default function JournalView({ date, currentDay, dayEntries, targets, bur
     <section className="cal-carry-panel" aria-label={t('Running calorie balance')}>
       <div className="cal-carry-heading"><h2>{t('Running calorie balance')}</h2><span>{t(burned.unavailable ? 'Waiting for Garmin' : selectedBalance?.settled ? 'Carried forward' : carryIsProvisional ? 'Future projection' : date === currentDay ? 'Today is provisional' : dayEntries.length ? 'Not settled yet' : 'Unlogged day')}</span></div>
       <div className="cal-carry-values"><span>{t('Base budget')}<strong>{burned.unavailable ? '—' : number(allowance.baseBudget, 1)} <small>kcal</small></strong></span><span>{t(carryIsProvisional ? 'Carry from last {days} days (provisional)' : 'Carry from last {days} days', { days: CARRY_SPREAD_DAYS })}<strong>{signedNumber(carryIn)} <small>kcal</small></strong></span><span>{t(selectedBalance ? 'Still to carry after this day' : 'Still to carry')}<strong>{burned.unavailable ? '—' : signedNumber(rawBalance)} <small>kcal</small></strong></span></div>
-      <details className="cal-carry-details"><summary>{t('How the running balance works')}</summary><p>{t('Each logged day’s difference from its budget is spread evenly over the next {days} days: eating 700 kcal over takes 100 kcal off each of the next {days} budgets, and eating under adds it the same way. Eating exactly your budget adds nothing new. Completed logged days settle.', { days: CARRY_SPREAD_DAYS })}{(note => note ? ` ${t(note)}` : '')(date === currentDay ? ledger.provisional ? 'Today’s balance is provisional and is included when previewing later days.' : dayEntries.length ? 'Today’s carry is waiting for calories burned.' : 'Today has no logged food, so it does not add to carry.' : !dayEntries.length ? 'This day has no logged food, so it does not add to carry.' : date > currentDay ? 'Planned future meals do not carry forward yet.' : '')}</p></details>
+      <details className="cal-carry-details"><summary>{t('How the running balance works')}</summary><p>{t('Each logged day’s difference from its budget is spread evenly over the next {days} days: eating 700 kcal over takes 100 kcal off each of the next {days} budgets, and eating under adds it the same way. Eating exactly your budget adds nothing new. Completed logged days settle.', { days: CARRY_SPREAD_DAYS })} {t('No day loses more than {cap} kcal to carry. Debt beyond that waits for the following days, so a large balance is spread over more than {days} days.', { cap: number(MAX_DAILY_CARRY_CUT), days: CARRY_SPREAD_DAYS })}{(note => note ? ` ${t(note)}` : '')(date === currentDay ? ledger.provisional ? 'Today’s balance is provisional and is included when previewing later days.' : dayEntries.length ? 'Today’s carry is waiting for calories burned.' : 'Today has no logged food, so it does not add to carry.' : !dayEntries.length ? 'This day has no logged food, so it does not add to carry.' : date > currentDay ? 'Planned future meals do not carry forward yet.' : '')}</p></details>
       {carryIsProvisional && <p>{t('Includes today’s provisional balance; updates as food or Garmin data changes.')}</p>}
       {hasPendingLoggedDays && <p className="cal-carry-pending-note">{t('Some logged days are waiting for Garmin data. Their balances are not included yet.')}</p>}
+      {waitingDebt > 0 && <p className="cal-carry-debt-note">{t('Carry takes at most {cap} kcal off a day, so {debt} kcal waits for the following days.', { cap: number(MAX_DAILY_CARRY_CUT), debt: number(waitingDebt, 1) })}</p>}
       {!burned.unavailable && allowance.deferredDebt > 0 && <p className="cal-carry-debt-note">{t('If you eat this day’s {budget} kcal budget, {debt} kcal of debt remains for later days.', { budget: number(budget, 1), debt: number(allowance.deferredDebt, 1) })}</p>}
     </section>
 
